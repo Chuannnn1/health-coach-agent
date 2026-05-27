@@ -107,7 +107,7 @@ class AgentCoreTest {
         public HttpHeaders headers() { return HttpHeaders.of(Map.of(), (a, b) -> true); }
         public URI uri() { return null; }
         public HttpClient.Version version() { return HttpClient.Version.HTTP_1_1; }
-        public SSLSession sslSession() { return null; }
+        public Optional<SSLSession> sslSession() { return Optional.empty(); }
     }
 
     /** Test subclass of AgentCore — replaces sendHttp with a canned-response queue and captures the last request. */

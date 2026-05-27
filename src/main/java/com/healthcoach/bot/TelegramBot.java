@@ -35,7 +35,7 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
         this(new OkHttpTelegramClient(botToken), agentCore, patchExecutor);
     }
 
-    TelegramBot(TelegramClient telegramClient, AgentCore agentCore, PatchExecutor patchExecutor) {
+    protected TelegramBot(TelegramClient telegramClient, AgentCore agentCore, PatchExecutor patchExecutor) {
         this.telegramClient = telegramClient;
         this.agentCore = agentCore;
         this.patchExecutor = patchExecutor;
