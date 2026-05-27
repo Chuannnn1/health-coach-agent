@@ -12,6 +12,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 
 /** Sends chat requests to an OpenAI-compatible LLM endpoint, returning the raw assistant content. */
 public class AgentCore {
@@ -40,7 +41,12 @@ public class AgentCore {
 
     /** Send a chat request to the LLM API and return the raw assistant message content. */
     public String chat(String userMessage) throws IOException, InterruptedException {
-        HttpRequest request = buildRequest(userMessage);
+        return chat(userMessage, List.of());
+    }
+
+    /** Same as chat(userMessage) but with prior turns injected between system prompt and the new user message. */
+    public String chat(String userMessage, List<ConversationStore.Message> history) throws IOException, InterruptedException {
+        HttpRequest request = buildRequest(userMessage, history);
         HttpResponse<String> response = sendHttp(request);
         int status = response.statusCode();
 
@@ -84,20 +90,34 @@ public class AgentCore {
         }
     }
 
-    /** Build the JSON request body for a given user message. */
+    /** Build the JSON request body for a given user message (no history). */
     String buildRequestBody(String userMessage) {
+        return buildRequestBody(userMessage, List.of());
+    }
+
+    /** Build the JSON request body, splicing prior turns between system prompt and new user message. */
+    String buildRequestBody(String userMessage, List<ConversationStore.Message> history) {
         String systemPrompt = promptBuilder.buildSystemPrompt();
+
+        com.google.gson.JsonArray messages = new com.google.gson.JsonArray();
 
         JsonObject sysMsg = new JsonObject();
         sysMsg.addProperty("role", "system");
         sysMsg.addProperty("content", systemPrompt);
+        messages.add(sysMsg);
+
+        if (history != null) {
+            for (ConversationStore.Message m : history) {
+                JsonObject hm = new JsonObject();
+                hm.addProperty("role", m.role());
+                hm.addProperty("content", m.content());
+                messages.add(hm);
+            }
+        }
 
         JsonObject userMsg = new JsonObject();
         userMsg.addProperty("role", "user");
         userMsg.addProperty("content", userMessage);
-
-        com.google.gson.JsonArray messages = new com.google.gson.JsonArray();
-        messages.add(sysMsg);
         messages.add(userMsg);
 
         JsonObject body = new JsonObject();
@@ -109,9 +129,14 @@ public class AgentCore {
         return gson.toJson(body);
     }
 
-    /** Build the prepared HttpRequest (POST to baseUrl) for a given user message. */
+    /** Build the prepared HttpRequest (POST to baseUrl) for a given user message (no history). */
     HttpRequest buildRequest(String userMessage) {
-        String json = buildRequestBody(userMessage);
+        return buildRequest(userMessage, List.of());
+    }
+
+    /** Build the prepared HttpRequest with history spliced in. */
+    HttpRequest buildRequest(String userMessage, List<ConversationStore.Message> history) {
+        String json = buildRequestBody(userMessage, history);
         return HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl))
                 .timeout(Duration.ofSeconds(60))

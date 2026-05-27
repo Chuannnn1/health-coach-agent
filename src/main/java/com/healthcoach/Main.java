@@ -3,8 +3,10 @@ package com.healthcoach;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.healthcoach.agent.AgentCore;
+import com.healthcoach.agent.ConversationStore;
 import com.healthcoach.agent.PatchExecutor;
 import com.healthcoach.agent.PromptBuilder;
+import com.healthcoach.bot.SlashRouter;
 import com.healthcoach.bot.TelegramBot;
 import com.healthcoach.memory.DailyLogStore;
 import com.healthcoach.memory.MemoryStore;
@@ -58,11 +60,14 @@ public class Main {
         PromptBuilder promptBuilder = new PromptBuilder(memoryStore, skillManager, dailyLogStore);
         AgentCore agentCore = new AgentCore(promptBuilder, llmCfg);
         PatchExecutor patchExecutor = new PatchExecutor(memoryStore, skillManager, dailyLogStore);
-        TelegramBot bot = new TelegramBot(botToken, agentCore, patchExecutor);
+        ConversationStore conversationStore = new ConversationStore(20);
+        SlashRouter slashRouter = new SlashRouter(memoryStore, skillManager, dailyLogStore, conversationStore);
+        TelegramBot bot = new TelegramBot(botToken, agentCore, patchExecutor, slashRouter, conversationStore);
         CronScheduler scheduler = new CronScheduler(bot, dailyLogStore, memoryStore, scheduleCfg);
 
         TelegramBotsLongPollingApplication botsApp = new TelegramBotsLongPollingApplication();
         botsApp.registerBot(botToken, bot);
+        bot.registerDefaultCommands();
         scheduler.start();
 
         log.info("Health Coach Agent 已啟動！");
@@ -72,6 +77,7 @@ public class Main {
             log.info("Shutting down...");
             try {
                 scheduler.stop();
+                bot.shutdown();
                 botsApp.close();
             } catch (Exception e) {
                 log.warn("Shutdown error: {}", e.getMessage());
