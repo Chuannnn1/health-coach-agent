@@ -42,9 +42,11 @@ if [ -z "$DISTRIBUTION_URL" ]; then
   exit 1
 fi
 
-DIST_DIR_NAME=$(basename "$DISTRIBUTION_URL" .zip)
-INSTALL_DIR="$HOME/.m2/wrapper/dists/$DIST_DIR_NAME"
-MAVEN_HOME="$INSTALL_DIR/$DIST_DIR_NAME"
+ZIP_NAME=$(basename "$DISTRIBUTION_URL" .zip)
+# zip extracts to apache-maven-X.Y.Z, not apache-maven-X.Y.Z-bin
+DIST_BASE=${ZIP_NAME%-bin}
+INSTALL_DIR="$HOME/.m2/wrapper/dists/$ZIP_NAME"
+MAVEN_HOME="$INSTALL_DIR/$DIST_BASE"
 
 if [ ! -x "$MAVEN_HOME/bin/mvn" ]; then
   echo "Downloading Maven from $DISTRIBUTION_URL ..." >&2

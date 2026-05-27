@@ -1,5 +1,5 @@
 @REM ----------------------------------------------------------------------------
-@REM Apache Maven Wrapper startup batch script (script-only mode), version 3.3.2
+@REM Apache Maven Wrapper startup batch script (script-only mode)
 @REM ----------------------------------------------------------------------------
 @echo off
 setlocal enabledelayedexpansion
@@ -13,6 +13,7 @@ if not exist "%WRAPPER_PROPS%" (
   exit /b 1
 )
 
+set "DISTRIBUTION_URL="
 for /f "usebackq tokens=1,* delims==" %%A in ("%WRAPPER_PROPS%") do (
   if /i "%%A"=="distributionUrl" set "DISTRIBUTION_URL=%%B"
 )
@@ -21,20 +22,37 @@ if not defined DISTRIBUTION_URL (
   exit /b 1
 )
 
-for %%F in ("%DISTRIBUTION_URL%") do set "DIST_FILE=%%~nF"
-set "INSTALL_DIR=%USERPROFILE%\.m2\wrapper\dists\%DIST_FILE%"
-set "MAVEN_HOME=%INSTALL_DIR%\%DIST_FILE%"
+@REM Filename in URL ends with apache-maven-X.Y.Z-bin.zip. Strip .zip then -bin
+@REM to derive the inner directory created by unzip (apache-maven-X.Y.Z).
+for %%F in ("%DISTRIBUTION_URL%") do set "ZIP_NAME=%%~nF"
+set "DIST_BASE=%ZIP_NAME:-bin=%"
+
+set "INSTALL_DIR=%USERPROFILE%\.m2\wrapper\dists\%ZIP_NAME%"
+set "MAVEN_HOME=%INSTALL_DIR%\%DIST_BASE%"
 
 if not exist "%MAVEN_HOME%\bin\mvn.cmd" (
   echo Downloading Maven from %DISTRIBUTION_URL% ...
-  if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-  powershell -NoProfile -Command "Invoke-WebRequest -Uri '%DISTRIBUTION_URL%' -OutFile '%INSTALL_DIR%\maven.zip' -UseBasicParsing"
-  if errorlevel 1 (
+  if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" 2>nul
+  set "ZIPFILE=%INSTALL_DIR%\maven.zip"
+
+  if exist "%SystemRoot%\System32\curl.exe" (
+    "%SystemRoot%\System32\curl.exe" -fSL "%DISTRIBUTION_URL%" -o "!ZIPFILE!"
+  ) else (
+    powershell.exe -NoProfile -Command "Invoke-WebRequest -Uri '%DISTRIBUTION_URL%' -OutFile '!ZIPFILE!' -UseBasicParsing"
+  )
+  if not exist "!ZIPFILE!" (
     echo Download failed. 1>&2
     exit /b 1
   )
-  powershell -NoProfile -Command "Expand-Archive -Force '%INSTALL_DIR%\maven.zip' '%INSTALL_DIR%'"
-  del "%INSTALL_DIR%\maven.zip"
+
+  powershell.exe -NoProfile -Command "Expand-Archive -Force -LiteralPath '!ZIPFILE!' -DestinationPath '%INSTALL_DIR%'"
+  del "!ZIPFILE!" 2>nul
+)
+
+if not exist "%MAVEN_HOME%\bin\mvn.cmd" (
+  echo Extraction did not produce %MAVEN_HOME%\bin\mvn.cmd 1>&2
+  dir "%INSTALL_DIR%" 1>&2
+  exit /b 1
 )
 
 call "%MAVEN_HOME%\bin\mvn.cmd" %*
