@@ -1,0 +1,11 @@
+target/
+*.class
+.idea/
+*.iml
+.vscode/
+.DS_Store
+data/logs/*.json
+!data/logs/.gitkeep
+
+# 不要把實際 credentials commit
+config.local.json
