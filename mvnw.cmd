@@ -47,6 +47,16 @@ if not exist "%MAVEN_HOME%\bin\mvn.cmd" (
 
   powershell.exe -NoProfile -Command "Expand-Archive -Force -LiteralPath '!ZIPFILE!' -DestinationPath '%INSTALL_DIR%'"
   del "!ZIPFILE!" 2>nul
+
+  @REM Wait for filesystem to flush after extraction
+  set "BOOT_OK="
+  for /L %%W in (1,1,5) do (
+    for %%J in ("%MAVEN_HOME%\boot\plexus-classworlds-*") do set "BOOT_OK=1"
+    if defined BOOT_OK goto :bootReady
+    echo Waiting for extraction to complete...
+    timeout /t 2 /nobreak >nul 2>nul
+  )
+  :bootReady
 )
 
 if not exist "%MAVEN_HOME%\bin\mvn.cmd" (

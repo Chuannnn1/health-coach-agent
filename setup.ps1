@@ -248,7 +248,9 @@ if (Test-Path (Abs 'data/preferences.json')) {
 $hasPriorState = ($saved.botToken -or $saved.lineChannelAccessToken -or $saved.apiKey -or $saved.mealReminders.Count -gt 0)
 if ($hasPriorState) {
     Write-Host ""
-    Write-Host "  偵測到之前儲存的設定。每一格按 Enter = 保留之前的值, 重新輸入 = 覆蓋。" -ForegroundColor DarkGray
+    Write-Host "  偵測到先前儲存的設定 (config.json)。" -ForegroundColor Yellow
+    Write-Host "  接下來會重新走一次設定流程，每一格按 Enter 即可保留之前的值。" -ForegroundColor DarkGray
+    Write-Host ""
 }
 
 # ----- [2/6] Channel selection -----
@@ -578,8 +580,13 @@ Write-Host ""
 Write-Host ("  " + $mvn + " clean package -q  (請稍候)") -ForegroundColor DarkGray
 & $mvn clean package -q
 if ($LASTEXITCODE -ne 0) {
-    Write-Err "Build failed"
-    exit $LASTEXITCODE
+    Write-Warn "Build failed, retrying..."
+    Start-Sleep -Seconds 3
+    & $mvn clean package -q
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Build failed"
+        exit $LASTEXITCODE
+    }
 }
 Write-Ok "Build complete"
 

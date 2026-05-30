@@ -156,15 +156,12 @@ else
     exit 1
 fi
 
-# ----- Overwrite check -----
+# ----- Prior config check -----
 if [ -f "config.json" ]; then
     echo ""
-    warn "config.json 已存在。"
-    if ! confirm "覆蓋現有設定？" "n"; then
-        echo ""
-        echo "  ${DIM}已取消，未變更任何檔案。${RESET}"
-        exit 0
-    fi
+    warn "偵測到先前儲存的設定 (config.json)。"
+    echo "  ${DIM}接下來會重新走一次設定流程，每一格按 Enter 即可保留之前的值。${RESET}"
+    echo ""
 fi
 
 # ----- [2/5] Telegram -----
@@ -382,8 +379,12 @@ ok "data/ scaffolded"
 echo ""
 echo "  ${DIM}$MVN clean package -q  (請稍候)${RESET}"
 if ! $MVN clean package -q; then
-    err "Build failed."
-    exit 1
+    warn "Build failed, retrying..."
+    sleep 3
+    if ! $MVN clean package -q; then
+        err "Build failed."
+        exit 1
+    fi
 fi
 ok "Build complete"
 
