@@ -388,13 +388,59 @@ if ! $MVN clean package -q; then
 fi
 ok "Build complete"
 
+# ----- Generate 'healthy' launcher -----
+PROJECT_ABS="$(cd "$(dirname "$0")" && pwd)"
+cat > healthy <<LAUNCHER
+#!/bin/bash
+PROJECT_DIR="$PROJECT_ABS"
+PIDFILE="\$PROJECT_DIR/data/bot.pid"
+
+case "\$1" in
+  stop)
+    if [ -f "\$PIDFILE" ]; then
+      kill "\$(cat "\$PIDFILE")" 2>/dev/null
+      rm -f "\$PIDFILE"
+    fi
+    echo "Health Coach Agent stopped."
+    ;;
+  log)
+    if [ -f "\$PROJECT_DIR/data/bot.log" ]; then
+      tail -100 "\$PROJECT_DIR/data/bot.log"
+    else
+      echo "No log file found."
+    fi
+    ;;
+  *)
+    cd "\$PROJECT_DIR"
+    nohup java -jar target/health-coach-agent.jar > data/bot.log 2>&1 &
+    echo \$! > "\$PIDFILE"
+    echo "Health Coach Agent started (PID: \$!)"
+    echo "  healthy stop  — stop the bot"
+    echo "  healthy log   — show recent log"
+    ;;
+esac
+LAUNCHER
+chmod +x healthy
+ok "healthy launcher created"
+
+# Symlink to ~/.local/bin for PATH access
+mkdir -p "$HOME/.local/bin"
+ln -sf "$PROJECT_ABS/healthy" "$HOME/.local/bin/healthy"
+if echo "$PATH" | grep -q "$HOME/.local/bin"; then
+    ok "'healthy' command ready"
+else
+    ok "Symlinked to ~/.local/bin/ (add to PATH if not already: export PATH=\"\$HOME/.local/bin:\$PATH\")"
+fi
+
 echo ""
 echo "${GREEN}${BOLD}==============================================${RESET}"
 echo "${GREEN}${BOLD}   Setup 完成！${RESET}"
 echo "${GREEN}${BOLD}==============================================${RESET}"
 echo ""
 echo "  下一步："
-echo "    ${CYAN}java -jar target/health-coach-agent.jar${RESET}"
+echo "    ${CYAN}healthy${RESET}          — 啟動 bot（背景執行）"
+echo "    ${CYAN}healthy stop${RESET}     — 停止 bot"
+echo "    ${CYAN}healthy log${RESET}      — 查看 log"
 echo ""
 echo "  ${DIM}到 Telegram 找你的 bot → /start 開始對話${RESET}"
 echo ""

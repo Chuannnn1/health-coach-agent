@@ -590,13 +590,45 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Ok "Build complete"
 
+# ----- Generate 'healthy' launcher -----
+$healthyCmd = @"
+@echo off
+cd /d "$ProjectRoot"
+if "%1"=="stop" (
+    taskkill /fi "WINDOWTITLE eq HealthCoach" /f >nul 2>&1
+    echo Health Coach Agent stopped.
+    exit /b
+)
+if "%1"=="log" (
+    if exist data\bot.log (type data\bot.log) else (echo No log file found.)
+    exit /b
+)
+start "HealthCoach" /min cmd /c "java -jar target\health-coach-agent.jar > data\bot.log 2>&1"
+echo Health Coach Agent started in background.
+echo   healthy stop  — stop the bot
+echo   healthy log   — show log
+"@
+WriteUtf8NoBom 'healthy.cmd' $healthyCmd
+Write-Ok "healthy.cmd created"
+
+$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+if (-not $userPath) { $userPath = '' }
+if ($userPath -notlike "*$ProjectRoot*") {
+    [Environment]::SetEnvironmentVariable('PATH', ($userPath.TrimEnd(';') + ";$ProjectRoot"), 'User')
+    Write-Ok "Added to PATH (restart terminal to use 'healthy' command)"
+} else {
+    Write-Ok "'healthy' command already on PATH"
+}
+
 Write-Host ""
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "   Setup 完成" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  下一步:" -ForegroundColor White
-Write-Host "    java -jar target\health-coach-agent.jar" -ForegroundColor Cyan
+Write-Host "    healthy          — 啟動 bot（背景執行）" -ForegroundColor Cyan
+Write-Host "    healthy stop     — 停止 bot" -ForegroundColor Cyan
+Write-Host "    healthy log      — 查看 log" -ForegroundColor Cyan
 Write-Host ""
 if ($selectedChannel -eq "telegram") {
     Write-Host "  到 Telegram 找你的 bot, /start 開始對話" -ForegroundColor DarkGray
@@ -604,4 +636,6 @@ if ($selectedChannel -eq "telegram") {
     Write-Host "  LINE webhook 會在 http://localhost:$linePort/callback 監聽" -ForegroundColor DarkGray
     Write-Host "  用 ngrok/cloudflared 暴露後, 到 LINE Developers Console 設定 Webhook URL" -ForegroundColor DarkGray
 }
+Write-Host ""
+Write-Host "  (重新開啟 terminal 後 'healthy' 指令才會生效)" -ForegroundColor DarkGray
 Write-Host ""

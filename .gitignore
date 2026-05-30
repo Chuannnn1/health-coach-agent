@@ -7,6 +7,8 @@ target/
 data/logs/*.json
 !data/logs/.gitkeep
 _run.bat
+healthy.cmd
+healthy
 
 # 不要把實際 credentials commit
 config.json
