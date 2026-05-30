@@ -336,11 +336,11 @@ Write-Host ""
 
 if ($providerIdx -eq 0) {
     Write-Host "  (輸入時不會顯示任何字元，直接打完按 Enter)" -ForegroundColor DarkGray
-    $savedGeminiKey = if ($saved.apiKey -match '^AIza') { $saved.apiKey } else { $null }
+    $savedGeminiKey = if ($saved.apiKey -match '^(AIza|AQ\.)') { $saved.apiKey } else { $null }
     $llmKey = Read-SecretValidatedOrKeep `
-        "Gemini API Key (AIza...)" `
-        '^AIza[A-Za-z0-9_-]{30,}$' `
-        "AIza 開頭, 從 Google AI Studio 取得" `
+        "Gemini API Key" `
+        '^[A-Za-z0-9][A-Za-z0-9._-]{19,}$' `
+        "從 Google AI Studio 取得, 至少 20 字" `
         $savedGeminiKey
     Write-Ok "API Key 格式 OK"
 

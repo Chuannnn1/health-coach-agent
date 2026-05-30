@@ -198,9 +198,9 @@ echo ""
 if [ "$PROVIDER_IDX" -eq 0 ]; then
     echo "  ${DIM}(輸入時不顯示)${RESET}"
     read_secret_validated LLM_KEY \
-        "Gemini API Key (AIza...)" \
-        '^AIza[A-Za-z0-9_-]{30,}$' \
-        "AIza 開頭 + 35 字元，從 Google AI Studio 取得"
+        "Gemini API Key" \
+        '^[A-Za-z0-9][A-Za-z0-9._-]{19,}$' \
+        "從 Google AI Studio 取得, 至少 20 字"
     ok "API Key 格式 OK"
 
     echo ""
