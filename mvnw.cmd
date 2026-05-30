@@ -50,13 +50,11 @@ if not exist "%MAVEN_HOME%\bin\mvn.cmd" (
 
   @REM Wait for filesystem to flush after extraction
   set "BOOT_OK="
-  for /L %%W in (1,1,5) do (
-    for %%J in ("%MAVEN_HOME%\boot\plexus-classworlds-*") do set "BOOT_OK=1"
-    if defined BOOT_OK goto :bootReady
+  for %%J in ("%MAVEN_HOME%\boot\plexus-classworlds-*") do set "BOOT_OK=1"
+  if not defined BOOT_OK (
     echo Waiting for extraction to complete...
-    timeout /t 2 /nobreak >nul 2>nul
+    timeout /t 3 /nobreak >nul 2>nul
   )
-  :bootReady
 )
 
 if not exist "%MAVEN_HOME%\bin\mvn.cmd" (

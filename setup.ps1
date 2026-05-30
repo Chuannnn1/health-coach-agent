@@ -615,9 +615,11 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 if (-not $userPath) { $userPath = '' }
 if ($userPath -notlike "*$ProjectRoot*") {
     [Environment]::SetEnvironmentVariable('PATH', ($userPath.TrimEnd(';') + ";$ProjectRoot"), 'User')
-    Write-Ok "Added to PATH (restart terminal to use 'healthy' command)"
+    $env:PATH += ";$ProjectRoot"
+    Write-Ok "Added to PATH ('healthy' command ready)"
 } else {
-    Write-Ok "'healthy' command already on PATH"
+    if ($env:PATH -notlike "*$ProjectRoot*") { $env:PATH += ";$ProjectRoot" }
+    Write-Ok "'healthy' command ready"
 }
 
 Write-Host ""
@@ -636,6 +638,4 @@ if ($selectedChannel -eq "telegram") {
     Write-Host "  LINE webhook 會在 http://localhost:$linePort/callback 監聽" -ForegroundColor DarkGray
     Write-Host "  用 ngrok/cloudflared 暴露後, 到 LINE Developers Console 設定 Webhook URL" -ForegroundColor DarkGray
 }
-Write-Host ""
-Write-Host "  (重新開啟 terminal 後 'healthy' 指令才會生效)" -ForegroundColor DarkGray
 Write-Host ""
