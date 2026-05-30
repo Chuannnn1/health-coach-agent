@@ -167,6 +167,7 @@ Gemma 模型用 `gemini-native` endpoint（免費 tier）；Gemini 模型用 Ope
 | Command | 功能 |
 |---------|------|
 | `/start` | 啟動 Coach |
+| `/setup` | 步驟式設定個人資料（互動表單） |
 | `/new` | 清空對話上下文 |
 | `/profile` | 個人資料 + BMR/TDEE |
 | `/today` | 今日紀錄 + 熱量進度條 |
@@ -201,14 +202,20 @@ LLM 會在回覆中用 `<PATCH>` 標籤自動修正知識。
 ```
 User → [Telegram LongPoll / LINE Webhook]
               ↓
-        AgentCore.chat()  ← PromptBuilder (soul.md + skills + memory)
-              ↓
-        PatchExecutor.execute()  → mutate stores + strip tags
+        AgentCore.chatStream()  ← streamGenerateContent SSE
+              ↓ (onDelta)
+        StreamingConsumer  → editMessageText progressive edit
+              ↓ (finish)
+        PatchExecutor.execute()  → mutate stores + PatchListener callback
               ↓
         ResponseSanitizer.sanitize()  → 三層過濾
               ↓
-        Clean text → User
+        editFinal() → User
 ```
+
+Interactive:
+- `/setup` → ProfileWizard state machine → InlineKeyboard (TG) / text (LINE)
+- PatchListener → real-time status messages (meal logged, profile updated)
 
 Memory layers:
 - Layer 1: `user_profile.json` + `memory.json`

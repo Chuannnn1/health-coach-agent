@@ -3,6 +3,7 @@ package com.healthcoach.bot;
 import com.healthcoach.agent.AgentCore;
 import com.healthcoach.agent.ConversationStore;
 import com.healthcoach.agent.PatchExecutor;
+import com.healthcoach.agent.PatchListener;
 import com.healthcoach.model.ExecutionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,9 +12,14 @@ import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateC
 import org.telegram.telegrambots.meta.api.methods.ActionType;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.send.SendChatAction;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
@@ -29,6 +35,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, MessageSender {
     private static final Logger log = LoggerFactory.getLogger(TelegramBot.class);
@@ -49,8 +56,11 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
     private final SlashRouter slashRouter;
     private final ConversationStore conversationStore;
 
+    private ProfileWizard profileWizard;
+
     private final Set<String> registeredChatIds = Collections.synchronizedSet(new HashSet<>());
     private final Map<String, ChatSession> sessions = new ConcurrentHashMap<>();
+    private final Map<String, AtomicBoolean> cancelFlags = new ConcurrentHashMap<>();
 
     private final ScheduledExecutorService debounceScheduler =
             Executors.newSingleThreadScheduledExecutor(daemon("tg-debounce"));
@@ -78,6 +88,10 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
         this(telegramClient, agentCore, patchExecutor, null, null);
     }
 
+    public void setProfileWizard(ProfileWizard wizard) {
+        this.profileWizard = wizard;
+    }
+
     private static java.util.concurrent.ThreadFactory daemon(String prefix) {
         return r -> {
             Thread t = new Thread(r, prefix);
@@ -86,10 +100,18 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
         };
     }
 
-    /** Handle one incoming Telegram update — slash command, debounced chat, or no-op. */
+    /** Handle one incoming Telegram update — callback query, slash command, wizard, debounced chat, or no-op. */
     @Override
     public void consume(Update update) {
-        if (update == null || !update.hasMessage() || !update.getMessage().hasText()) return;
+        if (update == null) return;
+
+        // Handle InlineKeyboard callback queries (wizard button presses)
+        if (update.hasCallbackQuery()) {
+            handleCallbackQuery(update.getCallbackQuery());
+            return;
+        }
+
+        if (!update.hasMessage() || !update.getMessage().hasText()) return;
         String chatId = String.valueOf(update.getMessage().getChatId());
         String text = update.getMessage().getText();
 
@@ -97,6 +119,27 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
             if ("/start".equals(text.trim())) {
                 registeredChatIds.add(chatId);
                 sendText(chatId, WELCOME);
+                return;
+            }
+
+            if ("/stop".equals(text.trim())) {
+                AtomicBoolean flag = cancelFlags.get(chatId);
+                if (flag != null) {
+                    flag.set(true);
+                } else {
+                    sendText(chatId, "目前沒有進行中的回覆。");
+                }
+                return;
+            }
+
+            if ("/setup".equals(text.trim()) && profileWizard != null) {
+                sendWizardResponse(chatId, profileWizard.start(chatId));
+                return;
+            }
+
+            // If wizard is active, route input to wizard instead of agent
+            if (profileWizard != null && profileWizard.isActive(chatId)) {
+                sendWizardResponse(chatId, profileWizard.handle(chatId, text));
                 return;
             }
 
@@ -117,6 +160,41 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
         } catch (Exception e) {
             log.warn("consume failed: {}", e.getMessage(), e);
             sendText(chatId, ERROR_MSG);
+        }
+    }
+
+    private void handleCallbackQuery(CallbackQuery cq) {
+        String chatId = String.valueOf(cq.getMessage().getChatId());
+        String data = cq.getData();
+        try {
+            telegramClient.execute(AnswerCallbackQuery.builder()
+                    .callbackQueryId(cq.getId()).build());
+        } catch (TelegramApiException e) {
+            log.debug("answerCallbackQuery failed: {}", e.getMessage());
+        }
+        if (profileWizard != null && profileWizard.isActive(chatId)) {
+            sendWizardResponse(chatId, profileWizard.handle(chatId, data));
+        }
+    }
+
+    private void sendWizardResponse(String chatId, ProfileWizard.WizardResponse resp) {
+        if (resp.choices().isEmpty()) {
+            sendText(chatId, resp.text());
+        } else {
+            InlineKeyboardRow row = new InlineKeyboardRow();
+            for (String choice : resp.choices()) {
+                row.add(InlineKeyboardButton.builder()
+                        .text(choice).callbackData(choice).build());
+            }
+            InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder()
+                    .keyboardRow(row).build();
+            try {
+                telegramClient.execute(SendMessage.builder()
+                        .chatId(chatId).text(resp.text())
+                        .replyMarkup(markup).build());
+            } catch (TelegramApiException e) {
+                log.warn("sendWizardResponse failed: {}", e.getMessage());
+            }
         }
     }
 
@@ -148,30 +226,65 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
     }
 
     private void processAgent(String chatId, String userMessage, boolean recordHistory) {
-        // Show typing immediately so user gets instant feedback
         sendTypingAction(chatId);
-        // Refresh typing every 4s (Telegram expires it at 5s) until cancelled
-        ScheduledFuture<?> typingTask = typingScheduler.scheduleAtFixedRate(
-                () -> sendTypingAction(chatId), 4, 4, TimeUnit.SECONDS);
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+        cancelFlags.put(chatId, cancelled);
         try {
             List<ConversationStore.Message> history = conversationStore != null
                     ? conversationStore.recent(chatId)
                     : List.of();
-            String raw = agentCore.chat(userMessage, history);
-            ExecutionResult result = patchExecutor.execute(raw);
+            StreamingConsumer consumer = new StreamingConsumer(telegramClient, chatId);
+            String raw = agentCore.chatStream(userMessage, history, consumer::onDelta, cancelled::get);
+
+            if (cancelled.get()) {
+                consumer.finishCancelled();
+                return;
+            }
+
+            consumer.finish();
+
+            patchExecutor.setListener(new PatchListener() {
+                public void onPatchApplied(String desc) { sendToolStatus(chatId, true, desc); }
+                public void onLogApplied(String desc) { sendToolStatus(chatId, false, desc); }
+            });
+            ExecutionResult result;
+            try {
+                result = patchExecutor.execute(raw);
+            } finally {
+                patchExecutor.setListener(null);
+            }
+
             if (recordHistory && conversationStore != null) {
                 conversationStore.appendUser(chatId, userMessage);
                 conversationStore.appendAssistant(chatId, result.cleanText);
             }
-            sendText(chatId, result.cleanText);
+            consumer.editFinal(result.cleanText);
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             log.warn("agent call failed: {}", e.getMessage(), e);
-            sendText(chatId, ERROR_MSG);
+            if (!cancelled.get()) sendText(chatId, ERROR_MSG);
         } finally {
-            typingTask.cancel(false);
+            cancelFlags.remove(chatId);
         }
+    }
+
+    private void sendToolStatus(String chatId, boolean isPatch, String desc) {
+        String icon;
+        if (!isPatch) {
+            icon = "📝";  // 📝
+        } else if (desc.startsWith("user_profile")) {
+            icon = "👤";  // 👤
+        } else if (desc.startsWith("memory")) {
+            icon = "🧠";  // 🧠
+        } else if (desc.startsWith("skill/")) {
+            icon = "📖";  // 📖
+        } else if (desc.startsWith("preferences")) {
+            icon = "⚙️";  // ⚙️
+        } else {
+            icon = "🔧";  // 🔧
+        }
+        sendText(chatId, icon + " " + desc);
     }
 
     /** Send a single typing action; ignore failure silently. */
@@ -212,6 +325,8 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
     public void registerDefaultCommands() {
         List<BotCommand> cmds = List.of(
                 new BotCommand("start", "啟動 Coach 並訂閱提醒"),
+                new BotCommand("stop", "中斷當前回覆"),
+                new BotCommand("setup", "步驟式設定個人資料"),
                 new BotCommand("new", "開始新對話，清空最近上下文"),
                 new BotCommand("profile", "查看你的個人資料"),
                 new BotCommand("today", "查看今日紀錄與剩餘熱量"),

@@ -29,6 +29,8 @@ public class SlashRouter {
     private static final String HELP =
             "Coach 指令：\n" +
             "/start — 啟動並訂閱提醒\n" +
+            "/stop — 中斷當前回覆\n" +
+            "/setup — 步驟式設定個人資料（互動表單）\n" +
             "/new — 開始新對話（清空最近上下文）\n" +
             "/profile — 看你的個人資料\n" +
             "/today — 看今天吃了什麼、還剩多少 kcal\n" +

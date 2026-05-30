@@ -17,6 +17,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /**
  * Sends chat requests to an LLM endpoint, returning the raw assistant content.
@@ -352,5 +355,154 @@ public class AgentCore {
             if (t != null && !t.isJsonNull()) sb.append(t.getAsString());
         }
         return sb.toString();
+    }
+
+    // ----- Streaming -----
+
+    /**
+     * Stream a chat response from the LLM, calling onDelta for each text chunk.
+     * Returns the full accumulated response text.
+     *
+     * For gemini-native: uses streamGenerateContent SSE endpoint.
+     * For openai style: falls back to synchronous chat() and delivers the full text as one delta.
+     */
+    public String chatStream(String userMessage, List<ConversationStore.Message> history,
+                             Consumer<String> onDelta) throws IOException, InterruptedException {
+        return chatStream(userMessage, history, onDelta, () -> false);
+    }
+
+    public String chatStream(String userMessage, List<ConversationStore.Message> history,
+                             Consumer<String> onDelta, Supplier<Boolean> cancelCheck)
+            throws IOException, InterruptedException {
+        if (!STYLE_GEMINI_NATIVE.equals(endpointStyle)) {
+            String fullText = chat(userMessage, history);
+            if (cancelCheck.get()) return fullText;
+            onDelta.accept(fullText);
+            return fullText;
+        }
+
+        HttpRequest request = buildStreamRequest(userMessage, history);
+        HttpResponse<Stream<String>> response = sendStreamHttp(request);
+        int status = response.statusCode();
+
+        if (status == 429) {
+            response.body().close();
+            Thread.sleep(2000);
+            response = sendStreamHttp(request);
+            status = response.statusCode();
+            if (status == 429) {
+                response.body().close();
+                throw new IOException("LLM rate limited (HTTP 429) after retry");
+            }
+        }
+
+        if (status >= 400) {
+            StringBuilder errBody = new StringBuilder();
+            try (Stream<String> lines = response.body()) {
+                lines.forEach(line -> errBody.append(line).append("\n"));
+            }
+            String body = errBody.toString();
+            String bodyTrimmed = body.length() > 500 ? body.substring(0, 500) : body;
+            if (status >= 500) {
+                throw new IOException("LLM server error: HTTP " + status);
+            }
+            throw new IOException("LLM error: HTTP " + status + " body=" + bodyTrimmed);
+        }
+
+        StringBuilder accumulated = new StringBuilder();
+        boolean insideThink = false;
+
+        try (Stream<String> lines = response.body()) {
+            java.util.Iterator<String> it = lines.iterator();
+            while (it.hasNext()) {
+                if (cancelCheck.get()) break;
+                String line = it.next();
+                if (!line.startsWith("data: ")) continue;
+                String json = line.substring(6).trim();
+                if (json.isEmpty() || "[DONE]".equals(json)) continue;
+
+                String chunkText = parseStreamChunk(json);
+                if (chunkText == null || chunkText.isEmpty()) continue;
+
+                int pos = 0;
+                while (pos < chunkText.length()) {
+                    if (insideThink) {
+                        int closeIdx = chunkText.indexOf("</think>", pos);
+                        if (closeIdx == -1) break;
+                        insideThink = false;
+                        pos = closeIdx + "</think>".length();
+                    } else {
+                        int openIdx = chunkText.indexOf("<think>", pos);
+                        if (openIdx == -1) {
+                            String segment = chunkText.substring(pos);
+                            accumulated.append(segment);
+                            onDelta.accept(segment);
+                            break;
+                        }
+                        if (openIdx > pos) {
+                            String segment = chunkText.substring(pos, openIdx);
+                            accumulated.append(segment);
+                            onDelta.accept(segment);
+                        }
+                        insideThink = true;
+                        pos = openIdx + "<think>".length();
+                    }
+                }
+            }
+        }
+
+        return accumulated.toString();
+    }
+
+    /**
+     * Parse a single SSE chunk from Gemini's streamGenerateContent response.
+     * Returns concatenated text from non-thought parts, or null if no text.
+     */
+    private String parseStreamChunk(String json) {
+        try {
+            JsonElement root = JsonParser.parseString(json);
+            if (!root.isJsonObject()) return null;
+            JsonArray candidates = root.getAsJsonObject().getAsJsonArray("candidates");
+            if (candidates == null || candidates.size() == 0) return null;
+            JsonObject cand0 = candidates.get(0).getAsJsonObject();
+            JsonObject content = cand0.getAsJsonObject("content");
+            if (content == null) return null;
+            JsonArray parts = content.getAsJsonArray("parts");
+            if (parts == null || parts.size() == 0) return null;
+
+            StringBuilder sb = new StringBuilder();
+            for (JsonElement p : parts) {
+                JsonObject partObj = p.getAsJsonObject();
+                JsonElement thought = partObj.get("thought");
+                if (thought != null && thought.getAsBoolean()) continue;
+                JsonElement t = partObj.get("text");
+                if (t != null && !t.isJsonNull()) sb.append(t.getAsString());
+            }
+            return sb.length() == 0 ? null : sb.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Build an HTTP request for the streaming endpoint.
+     * Same as buildRequest() but uses streamGenerateContent?alt=sse and 120s timeout.
+     */
+    HttpRequest buildStreamRequest(String userMessage, List<ConversationStore.Message> history) {
+        String json = buildRequestBody(userMessage, history);
+        String trimmed = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        URI uri = URI.create(trimmed + "/models/" + model + ":streamGenerateContent?alt=sse");
+
+        return HttpRequest.newBuilder()
+                .uri(uri)
+                .timeout(Duration.ofSeconds(120))
+                .header("Content-Type", "application/json")
+                .header("x-goog-api-key", apiKey)
+                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                .build();
+    }
+
+    private HttpResponse<Stream<String>> sendStreamHttp(HttpRequest request) throws IOException, InterruptedException {
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
     }
 }

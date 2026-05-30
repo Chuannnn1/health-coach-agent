@@ -165,20 +165,20 @@ class TelegramBotTest {
                 "action wire value should be 'typing'");
     }
 
-    // ---------- 2) keepalive refreshes during slow LLM ----------
+    // ---------- 2) initial typing fires even during slow LLM (keepalive replaced by streaming) ----------
 
     @Test
-    void tTypingKeepaliveFiresWhenLlmSlow() throws Exception {
+    void tTypingFiresBeforeSlowLlm() throws Exception {
         agent.replyText = "done";
-        agent.sleepMs = 5_000;  // slow LLM ⇒ keepalive should refresh at 4s
+        agent.sleepMs = 2_000;
 
         Thread t = runProcessAgentAsync("99", "long task");
-        t.join(8_000);
+        t.join(5_000);
         assertFalse(t.isAlive(), "processAgent should complete after slow chat returns");
 
         long typingCount = client.calls().stream().filter(o -> o instanceof SendChatAction).count();
-        assertTrue(typingCount >= 2,
-                "expected at least 2 SendChatAction calls during a 5s LLM call, got " + typingCount);
+        assertTrue(typingCount >= 1,
+                "expected at least 1 initial SendChatAction before streaming begins, got " + typingCount);
     }
 
     // ---------- 3) keepalive cancelled when LLM fails ----------

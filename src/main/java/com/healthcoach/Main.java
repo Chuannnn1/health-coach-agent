@@ -6,6 +6,7 @@ import com.healthcoach.agent.AgentCore;
 import com.healthcoach.agent.ConversationStore;
 import com.healthcoach.agent.PatchExecutor;
 import com.healthcoach.agent.PromptBuilder;
+import com.healthcoach.bot.ProfileWizard;
 import com.healthcoach.bot.SlashRouter;
 import com.healthcoach.bot.LineWebhookServer;
 import com.healthcoach.bot.TelegramBot;
@@ -70,6 +71,7 @@ public class Main {
                 preferencesStore, reschedule);
         SlashRouter slashRouter = new SlashRouter(memoryStore, skillManager, dailyLogStore,
                 conversationStore, preferencesStore, reschedule);
+        ProfileWizard profileWizard = new ProfileWizard(memoryStore);
 
         if ("line".equals(channel)) {
             JsonObject lineCfg = config.getAsJsonObject("line");
@@ -84,6 +86,7 @@ public class Main {
             LineWebhookServer lineServer = new LineWebhookServer(
                     lineSecret, lineToken, linePort,
                     agentCore, patchExecutor, conversationStore);
+            lineServer.setProfileWizard(profileWizard);
             lineServer.start();
 
             CronScheduler scheduler = new CronScheduler(lineServer, dailyLogStore, memoryStore, preferencesStore);
@@ -111,6 +114,7 @@ public class Main {
             }
 
             TelegramBot bot = new TelegramBot(botToken, agentCore, patchExecutor, slashRouter, conversationStore);
+            bot.setProfileWizard(profileWizard);
             CronScheduler scheduler = new CronScheduler(bot, dailyLogStore, memoryStore, preferencesStore);
             schedulerHolder[0] = scheduler;
 

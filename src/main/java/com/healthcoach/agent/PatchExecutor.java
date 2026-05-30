@@ -36,6 +36,8 @@ public class PatchExecutor {
     private final Runnable onPreferencesChanged;
     private final Gson gson;
 
+    private PatchListener listener;
+
     /** Construct an executor without preferences support (tests / legacy callers). */
     public PatchExecutor(MemoryStore memoryStore, SkillManager skillManager, DailyLogStore dailyLogStore) {
         this(memoryStore, skillManager, dailyLogStore, null, null);
@@ -50,6 +52,11 @@ public class PatchExecutor {
         this.preferencesStore = preferencesStore;
         this.onPreferencesChanged = onPreferencesChanged;
         this.gson = new Gson();
+    }
+
+    /** Set an optional listener that receives callbacks on every successful PATCH/LOG operation. */
+    public void setListener(PatchListener listener) {
+        this.listener = listener;
     }
 
     /** Parse PATCH/LOG blocks from rawReply, mutate stores, and return the cleaned reply text plus a per-block result log. */
@@ -99,6 +106,7 @@ public class PatchExecutor {
                         li.estimatedKcal, li.proteinG, li.carbsG, li.fatG, "llm_estimate");
                 dailyLogStore.addMeal(meal);
                 patchResults.add("meal logged: " + li.description);
+                fireListener(false, "meal logged: " + li.description + " " + li.estimatedKcal + " kcal");
             } catch (Exception ex) {
                 patchResults.add("LOG failed: " + ex.getMessage());
             }
@@ -119,12 +127,15 @@ public class PatchExecutor {
         if ("user_profile".equals(target)) {
             memoryStore.updateField(p.field, p.value);
             patchResults.add("user_profile." + p.field + " updated");
+            fireListener(true, "user_profile." + p.field + " updated");
             return;
         }
         if (target.startsWith("skill/")) {
             String skillName = target.substring("skill/".length());
             boolean ok = skillManager.patchSkill(skillName, p.action, p.content);
-            patchResults.add("skill/" + skillName + ":" + p.action + " " + (ok ? "ok" : "failed"));
+            String result = "skill/" + skillName + ":" + p.action + " " + (ok ? "ok" : "failed");
+            patchResults.add(result);
+            if (ok) fireListener(true, result);
             return;
         }
         if ("preferences".equals(target)) {
@@ -141,11 +152,13 @@ public class PatchExecutor {
                 case "add": {
                     boolean ok = memoryStore.addMemory(p.content);
                     patchResults.add("memory add: " + (ok ? "ok" : "failed"));
+                    if (ok) fireListener(true, "memory add: " + p.content);
                     break;
                 }
                 case "remove": {
                     boolean ok = memoryStore.removeMemory(p.content);
                     patchResults.add("memory remove: " + (ok ? "ok" : "failed"));
+                    if (ok) fireListener(true, "memory remove: ok");
                     break;
                 }
                 case "replace": {
@@ -160,6 +173,7 @@ public class PatchExecutor {
                     }
                     boolean ok = memoryStore.replaceMemory(parts[0], parts[1]);
                     patchResults.add("memory replace: " + (ok ? "ok" : "failed"));
+                    if (ok) fireListener(true, "memory replace: ok");
                     break;
                 }
                 default:
@@ -181,40 +195,50 @@ public class PatchExecutor {
                     return;
                 }
                 Preferences updated = preferencesStore.setMealReminders(times);
-                patchResults.add("preferences.mealReminders = " + updated.mealReminders);
+                String mealDesc = "preferences.mealReminders = " + updated.mealReminders;
+                patchResults.add(mealDesc);
+                fireListener(true, mealDesc);
                 fireReschedule();
                 return;
             }
             case "clear_meals": {
                 Preferences updated = preferencesStore.setMealReminders(new ArrayList<>());
                 patchResults.add("preferences.mealReminders cleared");
+                fireListener(true, "preferences.mealReminders cleared");
                 fireReschedule();
                 return;
             }
             case "set_workout": {
                 String time = asString(p.value);
                 preferencesStore.setWorkoutReminder(time);
-                patchResults.add("preferences.workoutReminder = " + time);
+                String workoutDesc = "preferences.workoutReminder = " + time;
+                patchResults.add(workoutDesc);
+                fireListener(true, workoutDesc);
                 fireReschedule();
                 return;
             }
             case "clear_workout": {
                 preferencesStore.setWorkoutReminder("");
                 patchResults.add("preferences.workoutReminder cleared");
+                fireListener(true, "preferences.workoutReminder cleared");
                 fireReschedule();
                 return;
             }
             case "set_weekly": {
                 String v = asString(p.value);
                 preferencesStore.setWeeklySummary(v);
-                patchResults.add("preferences.weeklySummary = " + v);
+                String weeklyDesc = "preferences.weeklySummary = " + v;
+                patchResults.add(weeklyDesc);
+                fireListener(true, weeklyDesc);
                 fireReschedule();
                 return;
             }
             case "set_timezone": {
                 String v = asString(p.value);
                 preferencesStore.setTimezone(v);
-                patchResults.add("preferences.timezone = " + v);
+                String tzDesc = "preferences.timezone = " + v;
+                patchResults.add(tzDesc);
+                fireListener(true, tzDesc);
                 fireReschedule();
                 return;
             }
@@ -255,5 +279,13 @@ public class PatchExecutor {
         if (onPreferencesChanged != null) {
             try { onPreferencesChanged.run(); } catch (Exception ignored) {}
         }
+    }
+
+    private void fireListener(boolean isPatch, String description) {
+        if (listener == null) return;
+        try {
+            if (isPatch) listener.onPatchApplied(description);
+            else listener.onLogApplied(description);
+        } catch (Exception ignored) {}
     }
 }

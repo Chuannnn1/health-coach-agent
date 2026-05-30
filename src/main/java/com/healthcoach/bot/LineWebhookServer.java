@@ -46,6 +46,7 @@ public class LineWebhookServer implements MessageSender {
     private final HttpClient httpClient;
     private final Gson gson = new Gson();
     private final Set<String> knownUserIds = Collections.synchronizedSet(new HashSet<>());
+    private ProfileWizard profileWizard;
     private HttpServer server;
 
     public LineWebhookServer(String channelSecret, String channelAccessToken, int port,
@@ -58,6 +59,10 @@ public class LineWebhookServer implements MessageSender {
         this.patchExecutor = patchExecutor;
         this.conversationStore = conversationStore;
         this.httpClient = HttpClient.newHttpClient();
+    }
+
+    public void setProfileWizard(ProfileWizard wizard) {
+        this.profileWizard = wizard;
     }
 
     public void start() throws IOException {
@@ -165,6 +170,18 @@ public class LineWebhookServer implements MessageSender {
     }
 
     private void handleTextMessage(String userId, String userText, String replyToken) {
+        // Handle /setup and wizard-active sessions
+        if ("/setup".equals(userText.trim()) && profileWizard != null) {
+            ProfileWizard.WizardResponse resp = profileWizard.start(userId);
+            replyText(replyToken, resp.text());
+            return;
+        }
+        if (profileWizard != null && profileWizard.isActive(userId)) {
+            ProfileWizard.WizardResponse resp = profileWizard.handle(userId, userText);
+            replyText(replyToken, resp.text());
+            return;
+        }
+
         try {
             List<ConversationStore.Message> history = conversationStore.recent(userId);
             conversationStore.appendUser(userId, userText);
