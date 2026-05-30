@@ -72,6 +72,13 @@ public class Main {
         SlashRouter slashRouter = new SlashRouter(memoryStore, skillManager, dailyLogStore,
                 conversationStore, preferencesStore, reschedule);
         ProfileWizard profileWizard = new ProfileWizard(memoryStore);
+        profileWizard.setAssessor(prompt -> {
+            try {
+                return agentCore.chat(prompt);
+            } catch (Exception e) {
+                return null;
+            }
+        });
 
         if ("line".equals(channel)) {
             JsonObject lineCfg = config.getAsJsonObject("line");

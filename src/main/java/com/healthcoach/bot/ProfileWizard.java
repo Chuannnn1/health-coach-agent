@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 /**
  * Step-by-step state machine that guides users through filling their health
@@ -18,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ProfileWizard {
 
     public enum Step {
-        NAME, GENDER, HEIGHT, WEIGHT, AGE, ACTIVITY, GOAL, DONE
+        NAME, GENDER, HEIGHT, WEIGHT, AGE, ACTIVITY, ACTIVITY_ASSESS, GOAL, DONE
     }
 
     /** Response from wizard -- either ask a question (with optional choices) or show completion. */
@@ -39,11 +40,25 @@ public class ProfileWizard {
         final UserProfile draft = new UserProfile();
     }
 
+    private static final String ASSESS_PROMPT =
+            "用戶正在設定健康檔案，他不確定自己的日常活動量等級。以下是他的描述：\n\n「%s」\n\n" +
+            "請根據這段描述判斷活動量等級，只回覆以下其中一個關鍵字（不要回覆任何其他內容）：\n" +
+            "sedentary — 久坐辦公，幾乎不運動\n" +
+            "light — 每週運動 1-3 次或輕度日常活動\n" +
+            "moderate — 每週運動 3-5 次\n" +
+            "active — 每週運動 6-7 次或體力工作\n" +
+            "very_active — 每天高強度訓練或重體力勞動";
+
     private final MemoryStore memoryStore;
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
+    private Function<String, String> assessor;
 
     public ProfileWizard(MemoryStore memoryStore) {
         this.memoryStore = memoryStore;
+    }
+
+    public void setAssessor(Function<String, String> assessor) {
+        this.assessor = assessor;
     }
 
     /** Check if a user currently has an active wizard session. */
@@ -139,14 +154,31 @@ public class ProfileWizard {
                 return promptForStep(s);
             }
             case ACTIVITY: {
+                if ("不確定".equals(input) || "unsure".equalsIgnoreCase(input)) {
+                    s.step = Step.ACTIVITY_ASSESS;
+                    return promptForStep(s);
+                }
                 String level = normalizeActivity(input);
                 if (level == null) {
-                    return WizardResponse.askWithChoices("請選擇活動量：",
-                            List.of("久坐", "輕度活動", "中度活動", "高度活動", "極高活動"));
+                    return promptForStep(s);
                 }
                 s.draft.activityLevel = level;
                 s.step = Step.GOAL;
                 return promptForStep(s);
+            }
+            case ACTIVITY_ASSESS: {
+                String result = assessActivity(input);
+                if (result == null) {
+                    s.step = Step.ACTIVITY;
+                    return WizardResponse.askWithChoices(
+                            "抱歉，我沒辦法從描述判斷，請直接選擇：",
+                            List.of("久坐", "輕度活動", "中度活動", "高度活動", "極高活動"));
+                }
+                s.draft.activityLevel = result;
+                s.step = Step.GOAL;
+                String display = "根據你的描述，我判斷你的活動量是「" + result + "」\n\n";
+                WizardResponse next = promptForStep(s);
+                return WizardResponse.askWithChoices(display + next.text(), next.choices());
             }
             case GOAL: {
                 String goal = normalizeGoal(input);
@@ -189,7 +221,10 @@ public class ProfileWizard {
                 yield WizardResponse.ask("請輸入年齡" + hint + "：");
             }
             case ACTIVITY -> WizardResponse.askWithChoices(
-                    "請選擇日常活動量：", List.of("久坐", "輕度活動", "中度活動", "高度活動", "極高活動"));
+                    "請選擇日常活動量：", activityChoices());
+            case ACTIVITY_ASSESS -> WizardResponse.ask(
+                    "請簡單描述你的日常作息和運動習慣，我來幫你判斷。\n" +
+                    "例如：「平常上班久坐，每週去健身房 3 次做重訓」");
             case GOAL -> WizardResponse.askWithChoices(
                     "請選擇目標：", List.of("增肌", "減脂", "維持"));
             case DONE -> WizardResponse.complete("設定已完成。");
@@ -271,6 +306,30 @@ public class ProfileWizard {
         if (lower.contains("減脂") || lower.contains("cut") || lower.contains("減重") || lower.contains("瘦")) return "減脂";
         if (lower.contains("維持") || lower.contains("maintain") || lower.contains("保持")) return "維持";
         return null;
+    }
+
+    private List<String> activityChoices() {
+        if (assessor != null) {
+            return List.of("久坐", "輕度活動", "中度活動", "高度活動", "極高活動", "不確定");
+        }
+        return List.of("久坐", "輕度活動", "中度活動", "高度活動", "極高活動");
+    }
+
+    private String assessActivity(String userDescription) {
+        if (assessor == null) return null;
+        try {
+            String response = assessor.apply(String.format(ASSESS_PROMPT, userDescription));
+            if (response == null) return null;
+            String lower = response.strip().toLowerCase();
+            if (lower.contains("very_active")) return "極高活動";
+            if (lower.contains("active") && !lower.contains("light")) return "高度活動";
+            if (lower.contains("moderate")) return "中度活動";
+            if (lower.contains("light")) return "輕度活動";
+            if (lower.contains("sedentary")) return "久坐";
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     // ------------------------------------------------------------------ //
