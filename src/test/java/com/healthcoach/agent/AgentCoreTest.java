@@ -1,8 +1,11 @@
 package com.healthcoach.agent;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.healthcoach.memory.DailyLogStore;
 import com.healthcoach.memory.MemoryStore;
+import com.healthcoach.memory.PreferencesStore;
 import com.healthcoach.memory.SkillManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -120,6 +124,10 @@ class AgentCoreTest {
             super(pb, cfg);
         }
 
+        TestableAgentCore(PromptBuilder pb, JsonObject cfg, PreferencesStore prefStore) {
+            super(pb, cfg, prefStore);
+        }
+
         @Override
         HttpResponse<String> sendHttp(HttpRequest request) {
             this.lastRequest = request;
@@ -193,5 +201,200 @@ class AgentCoreTest {
         assertEquals("Bearer fake-key", auth);
         String contentType = core.lastRequest.headers().firstValue("Content-Type").orElse("");
         assertEquals("application/json", contentType);
+    }
+
+    // ---------- Gemini native endpoint style ----------
+
+    private JsonObject nativeCfg() {
+        JsonObject c = new JsonObject();
+        c.addProperty("apiKey", "AIza-fake");
+        c.addProperty("baseUrl", "https://generativelanguage.googleapis.com/v1beta");
+        c.addProperty("model", "gemma-4-31b-it");
+        c.addProperty("maxTokens", 100);
+        c.addProperty("temperature", 0.5);
+        c.addProperty("endpointStyle", "gemini-native");
+        return c;
+    }
+
+    @Test
+    void t78_nativeBodyHasSystemInstructionAndContents() {
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, nativeCfg());
+        String body = core.buildRequestBody("我中午吃了便當");
+        assertTrue(body.contains("systemInstruction"), "should contain systemInstruction: " + body.substring(0, Math.min(200, body.length())));
+        assertTrue(body.contains("contents"), "should contain contents array");
+        assertTrue(body.contains("generationConfig"), "should contain generationConfig");
+        assertTrue(body.contains("maxOutputTokens"), "should use maxOutputTokens not max_tokens");
+        assertTrue(body.contains("我中午吃了便當"), "should contain literal user message");
+        assertTrue(body.contains("\"parts\""), "Gemini format uses 'parts'");
+    }
+
+    @Test
+    void t79_nativeResponseParsing() throws Exception {
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, nativeCfg());
+        core.responses.add(new FakeHttpResponse(200,
+                "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"嗨\"}]}}]}"));
+        assertEquals("嗨", core.chat("hi"));
+    }
+
+    @Test
+    void t80_nativeUsesGoogApiKeyHeader() throws Exception {
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, nativeCfg());
+        core.responses.add(new FakeHttpResponse(200,
+                "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]}}]}"));
+        core.chat("hi");
+        String googKey = core.lastRequest.headers().firstValue("x-goog-api-key").orElse("");
+        assertEquals("AIza-fake", googKey);
+        String auth = core.lastRequest.headers().firstValue("Authorization").orElse("");
+        assertEquals("", auth, "native mode must NOT send Authorization header");
+    }
+
+    @Test
+    void t81_nativeUrlIncludesModelAndGenerateContent() throws Exception {
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, nativeCfg());
+        core.responses.add(new FakeHttpResponse(200,
+                "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]}}]}"));
+        core.chat("hi");
+        String uri = core.lastRequest.uri().toString();
+        assertEquals(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent",
+                uri);
+    }
+
+    @Test
+    void t82_nativeMapsAssistantRoleToModel() {
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, nativeCfg());
+        List<ConversationStore.Message> hist = List.of(
+                new ConversationStore.Message("user", "earlier"),
+                new ConversationStore.Message("assistant", "previous reply")
+        );
+        String body = core.buildRequestBody("now", hist);
+        assertTrue(body.contains("\"role\":\"model\""), "assistant role must be mapped to 'model': " + body);
+        assertTrue(body.contains("previous reply"), "history assistant text must appear");
+        assertTrue(body.contains("earlier"), "history user text must appear");
+        assertTrue(body.contains("\"role\":\"user\""), "user role kept as 'user'");
+    }
+
+    // ---------- /effort wiring ----------
+
+    private JsonObject gemini3Cfg() {
+        JsonObject c = new JsonObject();
+        c.addProperty("apiKey", "AIza-fake");
+        c.addProperty("baseUrl", "https://generativelanguage.googleapis.com/v1beta");
+        c.addProperty("model", "gemini-3.5-flash");
+        c.addProperty("maxTokens", 100);
+        c.addProperty("temperature", 0.5);
+        c.addProperty("endpointStyle", "gemini-native");
+        return c;
+    }
+
+    @Test
+    void tEffortLowIncludedInGeminiNativeBodyForGemini3() {
+        PreferencesStore prefStore = new PreferencesStore(tempDir);
+        prefStore.setEffort("low");
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, gemini3Cfg(), prefStore);
+        String body = core.buildRequestBody("hi");
+        JsonElement root = JsonParser.parseString(body);
+        JsonObject genCfg = root.getAsJsonObject().getAsJsonObject("generationConfig");
+        assertNotNull(genCfg, "generationConfig missing");
+        JsonObject thinking = genCfg.getAsJsonObject("thinkingConfig");
+        assertNotNull(thinking, "thinkingConfig should be present for gemini-3* models");
+        assertEquals(0, thinking.get("thinkingBudget").getAsInt());
+    }
+
+    @Test
+    void tEffortHighForGemini3Produces8192Budget() {
+        PreferencesStore prefStore = new PreferencesStore(tempDir);
+        prefStore.setEffort("high");
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, gemini3Cfg(), prefStore);
+        String body = core.buildRequestBody("hi");
+        JsonElement root = JsonParser.parseString(body);
+        JsonObject genCfg = root.getAsJsonObject().getAsJsonObject("generationConfig");
+        JsonObject thinking = genCfg.getAsJsonObject("thinkingConfig");
+        assertNotNull(thinking, "thinkingConfig should be present");
+        assertEquals(8192, thinking.get("thinkingBudget").getAsInt());
+    }
+
+    @Test
+    void tEffortSkippedForGemma() {
+        PreferencesStore prefStore = new PreferencesStore(tempDir);
+        prefStore.setEffort("high");
+        // nativeCfg() uses model gemma-4-31b-it
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, nativeCfg(), prefStore);
+        String body = core.buildRequestBody("hi");
+        assertTrue(!body.contains("thinkingConfig"),
+                "thinkingConfig must NOT be present for Gemma models, body=" + body);
+    }
+
+    @Test
+    void tEffortIncludedInOpenAiBody() {
+        PreferencesStore prefStore = new PreferencesStore(tempDir);
+        prefStore.setEffort("high");
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, cfg, prefStore);
+        String body = core.buildRequestBody("hi");
+        JsonElement root = JsonParser.parseString(body);
+        JsonObject obj = root.getAsJsonObject();
+        assertTrue(obj.has("reasoning_effort"), "openai body should contain reasoning_effort: " + body);
+        assertEquals("high", obj.get("reasoning_effort").getAsString());
+    }
+
+    // ---------- Three-tier effort resolution (preferences → config → "medium") ----------
+
+    /** Write preferences.json with an explicitly-blank effort field, bypassing
+     *  PreferencesStore.setEffort which would normalize blank → "medium". */
+    private void writePreferencesWithBlankEffort() throws IOException {
+        String json = "{\n"
+                + "  \"timezone\": \"Asia/Taipei\",\n"
+                + "  \"mealReminders\": [],\n"
+                + "  \"workoutReminder\": \"\",\n"
+                + "  \"weeklySummary\": \"\",\n"
+                + "  \"effort\": \"\"\n"
+                + "}\n";
+        Files.writeString(tempDir.resolve("preferences.json"), json, StandardCharsets.UTF_8);
+    }
+
+    @Test
+    void tConfigEffortUsedWhenNoPreference() throws Exception {
+        JsonObject c = gemini3Cfg();
+        c.addProperty("effort", "high");  // config default = high
+        writePreferencesWithBlankEffort();  // preferences = blank → should fall through
+        PreferencesStore prefStore = new PreferencesStore(tempDir);
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, c, prefStore);
+        String body = core.buildRequestBody("hi");
+        JsonObject parsed = JsonParser.parseString(body).getAsJsonObject();
+        int budget = parsed.getAsJsonObject("generationConfig")
+                .getAsJsonObject("thinkingConfig")
+                .get("thinkingBudget").getAsInt();
+        assertEquals(8192, budget,
+                "config effort=high should produce thinkingBudget=8192 when preferences blank");
+    }
+
+    @Test
+    void tPreferenceOverridesConfigEffort() {
+        JsonObject c = gemini3Cfg();
+        c.addProperty("effort", "high");  // config says high
+        PreferencesStore prefStore = new PreferencesStore(tempDir);
+        prefStore.setEffort("low");  // preferences says low → should win
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, c, prefStore);
+        String body = core.buildRequestBody("hi");
+        JsonObject parsed = JsonParser.parseString(body).getAsJsonObject();
+        int budget = parsed.getAsJsonObject("generationConfig")
+                .getAsJsonObject("thinkingConfig")
+                .get("thinkingBudget").getAsInt();
+        assertEquals(0, budget, "preferences=low should beat config=high");
+    }
+
+    @Test
+    void tMissingConfigEffortFallsBackToMedium() throws Exception {
+        JsonObject c = gemini3Cfg();
+        // do NOT add effort to cfg → simulate old config.json without effort field
+        writePreferencesWithBlankEffort();  // preferences blank too
+        PreferencesStore prefStore = new PreferencesStore(tempDir);
+        TestableAgentCore core = new TestableAgentCore(promptBuilder, c, prefStore);
+        String body = core.buildRequestBody("hi");
+        JsonObject parsed = JsonParser.parseString(body).getAsJsonObject();
+        int budget = parsed.getAsJsonObject("generationConfig")
+                .getAsJsonObject("thinkingConfig")
+                .get("thinkingBudget").getAsInt();
+        assertEquals(1024, budget, "default fallback should be medium → 1024");
     }
 }

@@ -1,0 +1,26 @@
+{
+  "channel": "telegram",
+
+  "telegram": {
+    "botToken": "",
+    "botUsername": "",
+    "allowedChatIds": []
+  },
+
+  "line": {
+    "channelSecret": "",
+    "channelAccessToken": "",
+    "webhookPort": 8080
+  },
+
+  "llm": {
+    "apiKey": "",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+    "model": "gemma-4-31b-it",
+    "endpointStyle": "gemini-native",
+    "effort": "medium",
+    "maxTokens": 1000,
+    "temperature": 0.7
+  },
+  "dataDir": "./data"
+}

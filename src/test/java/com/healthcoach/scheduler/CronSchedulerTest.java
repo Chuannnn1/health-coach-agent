@@ -1,10 +1,10 @@
 package com.healthcoach.scheduler;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 import com.healthcoach.bot.TelegramBot;
 import com.healthcoach.memory.DailyLogStore;
 import com.healthcoach.memory.MemoryStore;
+import com.healthcoach.memory.PreferencesStore;
+import com.healthcoach.model.Preferences;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -28,6 +28,7 @@ class CronSchedulerTest {
 
     private MemoryStore memoryStore;
     private DailyLogStore dailyLogStore;
+    private PreferencesStore preferencesStore;
     private FakeBot bot;
     private CronScheduler cron;
 
@@ -45,21 +46,15 @@ class CronSchedulerTest {
 
         memoryStore = new MemoryStore(tempDir);
         dailyLogStore = new DailyLogStore(tempDir);
+        preferencesStore = new PreferencesStore(tempDir);
+        preferencesStore.save(new Preferences(
+                "Asia/Taipei",
+                List.of("07:30", "12:00", "18:00"),
+                "20:00",
+                "SUN 21:00"
+        ));
         bot = new FakeBot();
-        cron = new CronScheduler(bot, dailyLogStore, memoryStore, defaultConfig());
-    }
-
-    private JsonObject defaultConfig() {
-        JsonObject cfg = new JsonObject();
-        cfg.addProperty("timezone", "Asia/Taipei");
-        JsonArray meals = new JsonArray();
-        meals.add("07:30");
-        meals.add("12:00");
-        meals.add("18:00");
-        cfg.add("mealReminders", meals);
-        cfg.addProperty("workoutReminder", "20:00");
-        cfg.addProperty("weeklySummary", "SUN 21:00");
-        return cfg;
+        cron = new CronScheduler(bot, dailyLogStore, memoryStore, preferencesStore);
     }
 
     @Test
@@ -110,6 +105,29 @@ class CronSchedulerTest {
         cron.start();
         cron.stop();
         assertTrue(cron.isStopped());
+    }
+
+    @Test
+    void t98_rescheduleResetsTaskCount() {
+        cron.start();
+        int initialCount = cron.activeTaskCount();
+        assertTrue(initialCount > 0);
+        // Change preferences then reschedule
+        preferencesStore.setMealReminders(List.of("12:00", "18:30"));
+        cron.reschedule();
+        // 2 meals + 1 workout = 3 tasks
+        assertEquals(3, cron.activeTaskCount());
+        cron.stop();
+    }
+
+    @Test
+    void t99_rescheduleWithEmptyMealsArmsWorkoutOnly() {
+        cron.start();
+        preferencesStore.setMealReminders(List.of());
+        cron.reschedule();
+        // workout only
+        assertEquals(1, cron.activeTaskCount());
+        cron.stop();
     }
 
     /** FakeBot bypasses the OkHttp client by overriding sendText / getRegisteredChatIds. */

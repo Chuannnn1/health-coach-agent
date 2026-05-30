@@ -3,14 +3,18 @@ package com.healthcoach.bot;
 import com.healthcoach.agent.ConversationStore;
 import com.healthcoach.memory.DailyLogStore;
 import com.healthcoach.memory.MemoryStore;
+import com.healthcoach.memory.PreferencesStore;
 import com.healthcoach.memory.SkillManager;
 import com.healthcoach.model.DailyLog;
 import com.healthcoach.model.MealEntry;
 import com.healthcoach.model.MemoryData;
 import com.healthcoach.model.MemoryEntry;
+import com.healthcoach.model.Preferences;
 import com.healthcoach.model.SkillSummary;
 import com.healthcoach.model.UserProfile;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -31,22 +35,55 @@ public class SlashRouter {
             "/memory — 看 Coach 記得的長期事實\n" +
             "/skills — 列出知識模組\n" +
             "/skill <名稱> — 看某個知識模組的內容\n" +
+            "/reminders — 看 / 改用餐 & 訓練提醒（用法：/reminders ?）\n" +
+            "/effort — 設定模型 reasoning effort（low/medium/high）\n" +
             "/analyze — 分析今日熱量狀況並建議下一餐\n" +
             "/suggest <早餐|午餐|晚餐|宵夜> — 根據偏好給建議\n" +
             "/chart — 用 markdown 表格呈現本週飲食趨勢\n" +
             "/help — 顯示這份指令清單";
 
+    private static final String REMINDERS_USAGE =
+            "用法：\n" +
+            "/reminders                    — 看目前設定\n" +
+            "/reminders set meals 07:30,12:00,18:00\n" +
+            "/reminders set workout 20:00\n" +
+            "/reminders set weekly SUN 21:00\n" +
+            "/reminders set timezone Asia/Taipei\n" +
+            "/reminders clear meals|workout\n" +
+            "/reminders preset 3meals|2meals|if|none\n" +
+            "\n或直接跟我說「以後只要午餐跟晚餐提醒」我也會改。";
+
+    private static final String EFFORT_USAGE =
+            "用法：/effort low|medium|high\n" +
+            "目前選項：\n" +
+            "  low    — 直覺回覆，最快（Gemini 3: thinkingBudget=0）\n" +
+            "  medium — 預設，平衡品質與速度（thinkingBudget=1024）\n" +
+            "  high   — 深度推理，較慢（thinkingBudget=8192）\n" +
+            "Gemma 系列不支援 reasoning，設定會被忽略。";
+
     private final MemoryStore memoryStore;
     private final SkillManager skillManager;
     private final DailyLogStore dailyLogStore;
     private final ConversationStore conversationStore;
+    private final PreferencesStore preferencesStore;  // nullable for legacy tests
+    private final Runnable onPreferencesChanged;       // nullable
 
+    /** Legacy constructor (no /reminders support). */
     public SlashRouter(MemoryStore memoryStore, SkillManager skillManager,
                        DailyLogStore dailyLogStore, ConversationStore conversationStore) {
+        this(memoryStore, skillManager, dailyLogStore, conversationStore, null, null);
+    }
+
+    /** Full constructor with /reminders support. */
+    public SlashRouter(MemoryStore memoryStore, SkillManager skillManager,
+                       DailyLogStore dailyLogStore, ConversationStore conversationStore,
+                       PreferencesStore preferencesStore, Runnable onPreferencesChanged) {
         this.memoryStore = memoryStore;
         this.skillManager = skillManager;
         this.dailyLogStore = dailyLogStore;
         this.conversationStore = conversationStore;
+        this.preferencesStore = preferencesStore;
+        this.onPreferencesChanged = onPreferencesChanged;
     }
 
     /** Dispatch a possible slash command. Returns NotHandled if text is not a slash command we know. */
@@ -72,6 +109,10 @@ public class SlashRouter {
                 return new Action.Reply(renderSkillList());
             case "/skill":
                 return new Action.Reply(renderSkill(arg));
+            case "/reminders":
+                return new Action.Reply(handleReminders(arg));
+            case "/effort":
+                return new Action.Reply(handleEffort(arg));
             case "/analyze":
                 return new Action.DelegateToAgent(buildAnalyzePrompt());
             case "/suggest":
@@ -178,6 +219,147 @@ public class SlashRouter {
         } catch (IllegalArgumentException e) {
             return "找不到知識模組「" + name + "」。用 /skills 看可用清單。";
         }
+    }
+
+    private String handleReminders(String arg) {
+        if (preferencesStore == null) {
+            return "提醒設定功能尚未啟用（PreferencesStore not wired）。";
+        }
+        if (arg == null || arg.isBlank() || arg.equals("?") || arg.equals("help")) {
+            return renderReminders() + "\n\n" + REMINDERS_USAGE;
+        }
+        String[] parts = arg.split("\\s+", 3);
+        String verb = parts[0].toLowerCase(Locale.ROOT);
+
+        switch (verb) {
+            case "set": {
+                if (parts.length < 3) return "用法：/reminders set <field> <value>\n\n" + REMINDERS_USAGE;
+                return handleRemindersSet(parts[1].toLowerCase(Locale.ROOT), parts[2]);
+            }
+            case "clear": {
+                if (parts.length < 2) return "用法：/reminders clear meals|workout";
+                return handleRemindersClear(parts[1].toLowerCase(Locale.ROOT));
+            }
+            case "preset": {
+                if (parts.length < 2) return "用法：/reminders preset 3meals|2meals|if|none";
+                return handleRemindersPreset(parts[1].toLowerCase(Locale.ROOT));
+            }
+            default:
+                return "不認得：" + verb + "\n\n" + REMINDERS_USAGE;
+        }
+    }
+
+    private String handleRemindersSet(String field, String value) {
+        Preferences pref;
+        switch (field) {
+            case "meals": {
+                List<String> times = new ArrayList<>();
+                for (String s : value.split(",")) {
+                    String t = s.trim();
+                    if (!t.isEmpty()) times.add(t);
+                }
+                pref = preferencesStore.setMealReminders(times);
+                break;
+            }
+            case "workout":
+                pref = preferencesStore.setWorkoutReminder(value.trim());
+                break;
+            case "weekly":
+                pref = preferencesStore.setWeeklySummary(value.trim());
+                break;
+            case "timezone":
+                pref = preferencesStore.setTimezone(value.trim());
+                break;
+            default:
+                return "不認得欄位：" + field + "（可用：meals / workout / weekly / timezone）";
+        }
+        fireReschedule();
+        return "已更新。\n\n" + renderReminders(pref);
+    }
+
+    private String handleRemindersClear(String field) {
+        Preferences pref;
+        switch (field) {
+            case "meals":
+                pref = preferencesStore.setMealReminders(new ArrayList<>());
+                break;
+            case "workout":
+                pref = preferencesStore.setWorkoutReminder("");
+                break;
+            case "weekly":
+                pref = preferencesStore.setWeeklySummary("");
+                break;
+            default:
+                return "不認得欄位：" + field + "（可清 meals / workout / weekly）";
+        }
+        fireReschedule();
+        return "已清空。\n\n" + renderReminders(pref);
+    }
+
+    private String handleRemindersPreset(String name) {
+        Preferences pref = preferencesStore.load();
+        switch (name) {
+            case "3meals":
+                pref.mealReminders = new ArrayList<>(Arrays.asList("07:30", "12:00", "18:00"));
+                break;
+            case "2meals":
+                pref.mealReminders = new ArrayList<>(Arrays.asList("12:00", "18:30"));
+                break;
+            case "if":
+            case "1meal":
+                pref.mealReminders = new ArrayList<>(Arrays.asList("18:00"));
+                break;
+            case "none":
+                pref.mealReminders = new ArrayList<>();
+                break;
+            default:
+                return "不認得 preset：" + name + "（可用：3meals / 2meals / if / none）";
+        }
+        preferencesStore.save(pref);
+        fireReschedule();
+        return "已套用 preset " + name + "。\n\n" + renderReminders(pref);
+    }
+
+    private String renderReminders() {
+        return renderReminders(preferencesStore.load());
+    }
+
+    private String renderReminders(Preferences pref) {
+        StringBuilder sb = new StringBuilder("⏰ 提醒設定\n");
+        sb.append("時區：").append(pref.timezone).append("\n");
+        if (pref.mealReminders == null || pref.mealReminders.isEmpty()) {
+            sb.append("用餐提醒：（無）\n");
+        } else {
+            sb.append("用餐提醒：").append(String.join(", ", pref.mealReminders)).append("\n");
+        }
+        sb.append("訓練提醒：")
+          .append(pref.workoutReminder == null || pref.workoutReminder.isBlank() ? "（無）" : pref.workoutReminder)
+          .append("\n");
+        sb.append("週報：")
+          .append(pref.weeklySummary == null || pref.weeklySummary.isBlank() ? "（無）" : pref.weeklySummary);
+        return sb.toString();
+    }
+
+    private void fireReschedule() {
+        if (onPreferencesChanged != null) {
+            try { onPreferencesChanged.run(); } catch (Exception ignored) {}
+        }
+    }
+
+    private String handleEffort(String arg) {
+        if (preferencesStore == null) {
+            return "effort 設定尚未啟用（PreferencesStore not wired）。";
+        }
+        if (arg == null || arg.isBlank() || arg.equals("?") || arg.equals("help")) {
+            Preferences p = preferencesStore.load();
+            return "🧠 目前 effort: " + p.effort + "\n\n" + EFFORT_USAGE;
+        }
+        String v = arg.trim().toLowerCase(Locale.ROOT);
+        if (!v.equals("low") && !v.equals("medium") && !v.equals("high")) {
+            return "不認得：" + arg + "\n\n" + EFFORT_USAGE;
+        }
+        Preferences p = preferencesStore.setEffort(v);
+        return "已設定 effort = " + p.effort + "（下次對話生效）";
     }
 
     private String buildAnalyzePrompt() {

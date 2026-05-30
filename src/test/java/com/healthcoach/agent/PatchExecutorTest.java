@@ -2,10 +2,12 @@ package com.healthcoach.agent;
 
 import com.healthcoach.memory.DailyLogStore;
 import com.healthcoach.memory.MemoryStore;
+import com.healthcoach.memory.PreferencesStore;
 import com.healthcoach.memory.SkillManager;
 import com.healthcoach.model.DailyLog;
 import com.healthcoach.model.ExecutionResult;
 import com.healthcoach.model.MemoryData;
+import com.healthcoach.model.Preferences;
 import com.healthcoach.model.UserProfile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -184,5 +186,131 @@ class PatchExecutorTest {
         ExecutionResult result = assertDoesNotThrow(() -> executor.execute(""));
         assertNotNull(result);
         assertEquals("", result.cleanText);
+    }
+
+    // ---------- preferences target ----------
+
+    private PatchExecutor newExecutorWithPreferences(int[] callCounter) {
+        PreferencesStore prefStore = new PreferencesStore(tempDir);
+        prefStore.save(new Preferences("Asia/Taipei",
+                new java.util.ArrayList<>(java.util.List.of("07:30", "12:00", "18:00")),
+                "20:00", "SUN 21:00"));
+        return new PatchExecutor(memoryStore, skillManager, dailyLogStore, prefStore,
+                () -> callCounter[0]++);
+    }
+
+    @Test
+    void t5_12_preferencesSetMealsArray() {
+        int[] calls = {0};
+        PatchExecutor ex = newExecutorWithPreferences(calls);
+        String input = "已改\n<PATCH>{\"target\":\"preferences\",\"action\":\"set_meals\",\"value\":[\"12:00\",\"18:30\"]}</PATCH>";
+        ExecutionResult r = ex.execute(input);
+        PreferencesStore p = new PreferencesStore(tempDir);
+        assertEquals(java.util.List.of("12:00", "18:30"), p.load().mealReminders);
+        assertEquals(1, calls[0], "reschedule callback should fire once");
+        assertEquals("已改", r.cleanText.trim());
+    }
+
+    @Test
+    void t5_13_preferencesSetMealsCommaString() {
+        int[] calls = {0};
+        PatchExecutor ex = newExecutorWithPreferences(calls);
+        String input = "<PATCH>{\"target\":\"preferences\",\"action\":\"set_meals\",\"value\":\"08:00, 13:00, 19:00\"}</PATCH>";
+        ex.execute(input);
+        PreferencesStore p = new PreferencesStore(tempDir);
+        assertEquals(java.util.List.of("08:00", "13:00", "19:00"), p.load().mealReminders);
+        assertEquals(1, calls[0]);
+    }
+
+    @Test
+    void t5_14_preferencesClearMeals() {
+        int[] calls = {0};
+        PatchExecutor ex = newExecutorWithPreferences(calls);
+        String input = "<PATCH>{\"target\":\"preferences\",\"action\":\"clear_meals\"}</PATCH>";
+        ex.execute(input);
+        assertTrue(new PreferencesStore(tempDir).load().mealReminders.isEmpty());
+        assertEquals(1, calls[0]);
+    }
+
+    @Test
+    void t5_15_preferencesSetWorkout() {
+        int[] calls = {0};
+        PatchExecutor ex = newExecutorWithPreferences(calls);
+        String input = "<PATCH>{\"target\":\"preferences\",\"action\":\"set_workout\",\"value\":\"21:30\"}</PATCH>";
+        ex.execute(input);
+        assertEquals("21:30", new PreferencesStore(tempDir).load().workoutReminder);
+        assertEquals(1, calls[0]);
+    }
+
+    @Test
+    void t5_16_preferencesPatchSkippedWhenStoreNotWired() {
+        // 'executor' here is the legacy one from setUp (no preferences store)
+        String input = "<PATCH>{\"target\":\"preferences\",\"action\":\"set_meals\",\"value\":[\"12:00\"]}</PATCH>";
+        ExecutionResult r = executor.execute(input);
+        // Should not throw and should not crash; result text is empty (only PATCH was in input)
+        assertNotNull(r);
+        assertTrue(r.patchResults.stream().anyMatch(s -> s.contains("no store wired") || s.contains("skipped")));
+    }
+
+    @Test
+    void t5_17_scratchpadStripped() {
+        String leak = ""
+                + "*   User says: \"again hi there ?\"\n"
+                + "*   Context: The user is greeting the coach again. No user profile is set yet.\n"
+                + "\n"
+                + "*   Role: Coach (professional yet friendly, warm but direct).\n"
+                + "*   Goal: Get user information (height, weight, age, gender, activity level, goal) to start providing health/fitness guidance.\n"
+                + "*   Constraints: Traditional Chinese, short response (<150 words), no meta-headers, no planning bullets, no code fences.\n"
+                + "\n"
+                + "*   Greeting: \"Hey there!\" or \"Hi again!\"\n"
+                + "*   Call to action: Ask for the necessary details.\n"
+                + "*   Specifics needed: Height, weight, age, gender, activity level, goal (muscle gain/fat loss/maintenance).嘿！我是 Coach。很高興再次見到你！\n"
+                + "\n"
+                + "準備好開始改變了嗎？\n"
+                + "<PATCH>\n{\"target\":\"memory\",\"action\":\"add\",\"content\":\"使用者打招呼\"}\n</PATCH>";
+
+        ExecutionResult result = executor.execute(leak);
+
+        assertFalse(result.cleanText.contains("User says:"),
+                "scratchpad 'User says:' should have been stripped; got: " + result.cleanText);
+        assertFalse(result.cleanText.contains("Role:"));
+        assertFalse(result.cleanText.contains("Goal:"));
+        assertFalse(result.cleanText.contains("Constraints:"));
+        assertTrue(result.cleanText.startsWith("嘿！我是 Coach。"),
+                "expected cleaned text to start with the Chinese reply; got: " + result.cleanText);
+
+        // PATCH was still applied
+        MemoryData mem = memoryStore.loadMemory();
+        assertEquals(1, mem.entries.size());
+        assertEquals("使用者打招呼", mem.entries.get(0).content);
+    }
+
+    @Test
+    void t5_18_thinkTagsStripped() {
+        String raw = "<think>\n* Role: Coach\n* Plan: greet user\n</think>\n你好！我是 Coach。";
+        ExecutionResult result = executor.execute(raw);
+        assertTrue(result.cleanText.startsWith("你好！我是 Coach"),
+                "expected think block stripped; got: " + result.cleanText);
+        assertFalse(result.cleanText.contains("<think>"));
+        assertFalse(result.cleanText.contains("Role:"));
+    }
+
+    @Test
+    void t5_19_unclosedThinkTagStripped() {
+        String raw = "<think>\n* Goal: greet\n* Maintain persona.\n\n你好！我是 Coach。";
+        ExecutionResult result = executor.execute(raw);
+        assertEquals("", result.cleanText,
+                "unclosed think should strip everything; got: " + result.cleanText);
+    }
+
+    @Test
+    void t5_20_thinkTagMixedWithPatch() {
+        String raw = "<think>planning</think>\n你好！\n<PATCH>\n{\"target\":\"memory\",\"action\":\"add\",\"content\":\"test\"}\n</PATCH>";
+        ExecutionResult result = executor.execute(raw);
+        assertTrue(result.cleanText.startsWith("你好！"),
+                "got: " + result.cleanText);
+        assertFalse(result.cleanText.contains("planning"));
+        assertFalse(result.cleanText.contains("PATCH"));
+        assertEquals(1, result.patchResults.size());
     }
 }

@@ -6,6 +6,11 @@ target/
 .DS_Store
 data/logs/*.json
 !data/logs/.gitkeep
+_run.bat
 
 # 不要把實際 credentials commit
+config.json
 config.local.json
+# 個人資料 / 對話紀錄 不上 git
+data/user_profile.json
+data/memory.json

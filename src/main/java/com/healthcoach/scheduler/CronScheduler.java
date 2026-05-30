@@ -1,10 +1,11 @@
 package com.healthcoach.scheduler;
 
-import com.google.gson.JsonObject;
-import com.healthcoach.bot.TelegramBot;
+import com.healthcoach.bot.MessageSender;
 import com.healthcoach.memory.DailyLogStore;
 import com.healthcoach.memory.MemoryStore;
+import com.healthcoach.memory.PreferencesStore;
 import com.healthcoach.model.DailyLog;
+import com.healthcoach.model.Preferences;
 import com.healthcoach.model.UserProfile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,8 +19,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Schedules meal and workout reminders. Reads current schedule from {@link PreferencesStore}
+ * so it can be re-armed at runtime via {@link #reschedule()} when the user changes preferences.
+ */
 public class CronScheduler {
     private static final Logger log = LoggerFactory.getLogger(CronScheduler.class);
     private static final long ONE_DAY_SECONDS = 24L * 60 * 60;
@@ -30,34 +36,56 @@ public class CronScheduler {
         t.setDaemon(true);
         return t;
     });
-    private final TelegramBot bot;
+    private final MessageSender bot;
     private final DailyLogStore dailyLogStore;
     private final MemoryStore memoryStore;
-    private final ZoneId timezone;
-    private final List<String> mealReminderTimes = new ArrayList<>();
-    private final String workoutReminderTime;
+    private final PreferencesStore preferencesStore;
+    private final List<ScheduledFuture<?>> currentTasks = new ArrayList<>();
 
-    public CronScheduler(TelegramBot bot, DailyLogStore dailyLogStore, MemoryStore memoryStore, JsonObject scheduleConfig) {
+    private ZoneId timezone;
+
+    public CronScheduler(MessageSender bot, DailyLogStore dailyLogStore, MemoryStore memoryStore,
+                         PreferencesStore preferencesStore) {
         this.bot = bot;
         this.dailyLogStore = dailyLogStore;
         this.memoryStore = memoryStore;
-        this.timezone = ZoneId.of(scheduleConfig.get("timezone").getAsString());
-        scheduleConfig.getAsJsonArray("mealReminders").forEach(e -> mealReminderTimes.add(e.getAsString()));
-        this.workoutReminderTime = scheduleConfig.get("workoutReminder").getAsString();
+        this.preferencesStore = preferencesStore;
+        this.timezone = ZoneId.of(preferencesStore.load().timezone);
     }
 
-    /** Schedule meal and workout reminders at fixed daily intervals. */
-    public void start() {
-        for (int i = 0; i < mealReminderTimes.size(); i++) {
-            String type = (i == 0) ? "breakfast" : (i == 1) ? "lunch" : "dinner";
-            scheduleDaily(type, LocalTime.parse(mealReminderTimes.get(i), HHMM));
+    /** Schedule meal and workout reminders from the current preferences. */
+    public synchronized void start() {
+        armFromPreferences();
+    }
+
+    /** Cancel all scheduled tasks and re-arm from current preferences. Idempotent. */
+    public synchronized void reschedule() {
+        for (ScheduledFuture<?> f : currentTasks) {
+            f.cancel(false);
         }
-        scheduleDaily("workout", LocalTime.parse(workoutReminderTime, HHMM));
+        currentTasks.clear();
+        armFromPreferences();
+    }
+
+    private void armFromPreferences() {
+        Preferences pref = preferencesStore.load();
+        this.timezone = ZoneId.of(pref.timezone);
+
+        List<String> meals = pref.mealReminders == null ? List.of() : pref.mealReminders;
+        for (int i = 0; i < meals.size(); i++) {
+            String type = (i == 0) ? "breakfast" : (i == 1) ? "lunch" : "dinner";
+            scheduleDaily(type, LocalTime.parse(meals.get(i), HHMM));
+        }
+        if (pref.workoutReminder != null && !pref.workoutReminder.isBlank()) {
+            scheduleDaily("workout", LocalTime.parse(pref.workoutReminder, HHMM));
+        }
     }
 
     private void scheduleDaily(String type, LocalTime t) {
         long delay = calculateInitialDelay(t, timezone);
-        executor.scheduleAtFixedRate(() -> fireForAll(type), delay, ONE_DAY_SECONDS, TimeUnit.SECONDS);
+        ScheduledFuture<?> f = executor.scheduleAtFixedRate(
+                () -> fireForAll(type), delay, ONE_DAY_SECONDS, TimeUnit.SECONDS);
+        currentTasks.add(f);
     }
 
     private void fireForAll(String type) {
@@ -70,7 +98,6 @@ public class CronScheduler {
         }
     }
 
-    /** Shut down the scheduler executor immediately. */
     public void stop() {
         executor.shutdownNow();
     }
@@ -110,7 +137,11 @@ public class CronScheduler {
         return Duration.between(now, target).getSeconds();
     }
 
-    /** Visible for testing: whether the underlying executor has been stopped. */
+    /** Visible for testing: count of currently armed tasks. */
+    int activeTaskCount() {
+        return currentTasks.size();
+    }
+
     boolean isStopped() {
         return executor.isShutdown();
     }

@@ -8,7 +8,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
+import org.telegram.telegrambots.meta.api.methods.ActionType;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
+import org.telegram.telegrambots.meta.api.methods.send.SendChatAction;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
@@ -28,7 +30,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
+public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, MessageSender {
     private static final Logger log = LoggerFactory.getLogger(TelegramBot.class);
 
     private static final String WELCOME =
@@ -54,6 +56,8 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
             Executors.newSingleThreadScheduledExecutor(daemon("tg-debounce"));
     private final ExecutorService workers =
             Executors.newCachedThreadPool(daemon("tg-worker"));
+    private final ScheduledExecutorService typingScheduler =
+            Executors.newScheduledThreadPool(2, daemon("tg-typing"));
 
     public TelegramBot(String botToken, AgentCore agentCore, PatchExecutor patchExecutor,
                        SlashRouter slashRouter, ConversationStore conversationStore) {
@@ -144,6 +148,11 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
     }
 
     private void processAgent(String chatId, String userMessage, boolean recordHistory) {
+        // Show typing immediately so user gets instant feedback
+        sendTypingAction(chatId);
+        // Refresh typing every 4s (Telegram expires it at 5s) until cancelled
+        ScheduledFuture<?> typingTask = typingScheduler.scheduleAtFixedRate(
+                () -> sendTypingAction(chatId), 4, 4, TimeUnit.SECONDS);
         try {
             List<ConversationStore.Message> history = conversationStore != null
                     ? conversationStore.recent(chatId)
@@ -160,6 +169,20 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
         } catch (Exception e) {
             log.warn("agent call failed: {}", e.getMessage(), e);
             sendText(chatId, ERROR_MSG);
+        } finally {
+            typingTask.cancel(false);
+        }
+    }
+
+    /** Send a single typing action; ignore failure silently. */
+    private void sendTypingAction(String chatId) {
+        try {
+            telegramClient.execute(SendChatAction.builder()
+                    .chatId(chatId)
+                    .action(ActionType.TYPING.toString())
+                    .build());
+        } catch (TelegramApiException e) {
+            log.debug("sendChatAction failed: {}", e.getMessage());
         }
     }
 
@@ -182,6 +205,7 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
     public void shutdown() {
         debounceScheduler.shutdownNow();
         workers.shutdownNow();
+        typingScheduler.shutdownNow();
     }
 
     /** Register the default slash command menu with Telegram (shows in the / button). */
@@ -194,6 +218,8 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer {
                 new BotCommand("memory", "查看 Coach 記得的長期事實"),
                 new BotCommand("skills", "列出知識模組"),
                 new BotCommand("skill", "查看某個知識模組的內容"),
+                new BotCommand("reminders", "看 / 改用餐 & 訓練提醒"),
+                new BotCommand("effort", "設定模型 reasoning effort"),
                 new BotCommand("analyze", "分析今日狀況並建議下一餐"),
                 new BotCommand("suggest", "根據偏好推薦餐點"),
                 new BotCommand("chart", "本週飲食趨勢表"),

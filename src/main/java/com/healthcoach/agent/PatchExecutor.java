@@ -4,13 +4,16 @@ import com.google.gson.Gson;
 import com.google.gson.JsonSyntaxException;
 import com.healthcoach.memory.DailyLogStore;
 import com.healthcoach.memory.MemoryStore;
+import com.healthcoach.memory.PreferencesStore;
 import com.healthcoach.memory.SkillManager;
 import com.healthcoach.model.ExecutionResult;
 import com.healthcoach.model.LogInstruction;
 import com.healthcoach.model.MealEntry;
 import com.healthcoach.model.PatchInstruction;
+import com.healthcoach.model.Preferences;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,17 +26,29 @@ public class PatchExecutor {
 
     private static final Pattern PATCH_PATTERN = Pattern.compile("<PATCH>\\s*(.*?)\\s*</PATCH>", Pattern.DOTALL);
     private static final Pattern LOG_PATTERN   = Pattern.compile("<LOG>\\s*(.*?)\\s*</LOG>",   Pattern.DOTALL);
+    private static final Pattern THINK_PATTERN = Pattern.compile("<think>.*?</think>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
+    private static final Pattern UNCLOSED_THINK = Pattern.compile("<think>.*", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
 
     private final MemoryStore memoryStore;
     private final SkillManager skillManager;
     private final DailyLogStore dailyLogStore;
+    private final PreferencesStore preferencesStore;
+    private final Runnable onPreferencesChanged;
     private final Gson gson;
 
-    /** Construct an executor that mutates the supplied stores when patches/logs are applied. */
+    /** Construct an executor without preferences support (tests / legacy callers). */
     public PatchExecutor(MemoryStore memoryStore, SkillManager skillManager, DailyLogStore dailyLogStore) {
+        this(memoryStore, skillManager, dailyLogStore, null, null);
+    }
+
+    /** Full constructor with preferences mutation and a reschedule callback. */
+    public PatchExecutor(MemoryStore memoryStore, SkillManager skillManager, DailyLogStore dailyLogStore,
+                         PreferencesStore preferencesStore, Runnable onPreferencesChanged) {
         this.memoryStore = memoryStore;
         this.skillManager = skillManager;
         this.dailyLogStore = dailyLogStore;
+        this.preferencesStore = preferencesStore;
+        this.onPreferencesChanged = onPreferencesChanged;
         this.gson = new Gson();
     }
 
@@ -91,7 +106,10 @@ public class PatchExecutor {
 
         String clean = PATCH_PATTERN.matcher(rawReply).replaceAll("");
         clean = LOG_PATTERN.matcher(clean).replaceAll("");
+        clean = THINK_PATTERN.matcher(clean).replaceAll("");
+        clean = UNCLOSED_THINK.matcher(clean).replaceAll("");
         clean = clean.trim();
+        clean = ResponseSanitizer.sanitize(clean);
         return new ExecutionResult(clean, patchResults);
     }
 
@@ -107,6 +125,14 @@ public class PatchExecutor {
             String skillName = target.substring("skill/".length());
             boolean ok = skillManager.patchSkill(skillName, p.action, p.content);
             patchResults.add("skill/" + skillName + ":" + p.action + " " + (ok ? "ok" : "failed"));
+            return;
+        }
+        if ("preferences".equals(target)) {
+            if (preferencesStore == null) {
+                patchResults.add("preferences patch skipped (no store wired)");
+                return;
+            }
+            applyPreferencesPatch(p, patchResults);
             return;
         }
         if ("memory".equals(target)) {
@@ -142,5 +168,92 @@ public class PatchExecutor {
             return;
         }
         patchResults.add("Unknown patch target: " + target);
+    }
+
+    /** Mutate preferences (schedule / timezone) and fire reschedule. */
+    private void applyPreferencesPatch(PatchInstruction p, List<String> patchResults) {
+        String action = p.action == null ? "" : p.action;
+        switch (action) {
+            case "set_meals": {
+                List<String> times = parseTimesList(p.value);
+                if (times == null) {
+                    patchResults.add("preferences set_meals failed (bad value)");
+                    return;
+                }
+                Preferences updated = preferencesStore.setMealReminders(times);
+                patchResults.add("preferences.mealReminders = " + updated.mealReminders);
+                fireReschedule();
+                return;
+            }
+            case "clear_meals": {
+                Preferences updated = preferencesStore.setMealReminders(new ArrayList<>());
+                patchResults.add("preferences.mealReminders cleared");
+                fireReschedule();
+                return;
+            }
+            case "set_workout": {
+                String time = asString(p.value);
+                preferencesStore.setWorkoutReminder(time);
+                patchResults.add("preferences.workoutReminder = " + time);
+                fireReschedule();
+                return;
+            }
+            case "clear_workout": {
+                preferencesStore.setWorkoutReminder("");
+                patchResults.add("preferences.workoutReminder cleared");
+                fireReschedule();
+                return;
+            }
+            case "set_weekly": {
+                String v = asString(p.value);
+                preferencesStore.setWeeklySummary(v);
+                patchResults.add("preferences.weeklySummary = " + v);
+                fireReschedule();
+                return;
+            }
+            case "set_timezone": {
+                String v = asString(p.value);
+                preferencesStore.setTimezone(v);
+                patchResults.add("preferences.timezone = " + v);
+                fireReschedule();
+                return;
+            }
+            default:
+                patchResults.add("preferences action unknown: " + action);
+        }
+    }
+
+    /** Accept "07:30,12:00,18:00", ["07:30","12:00"], or comma+space variants. */
+    @SuppressWarnings("unchecked")
+    private List<String> parseTimesList(Object value) {
+        if (value == null) return null;
+        if (value instanceof List) {
+            List<String> out = new ArrayList<>();
+            for (Object o : (List<Object>) value) {
+                if (o != null) out.add(o.toString().trim());
+            }
+            return out;
+        }
+        if (value instanceof String) {
+            String[] parts = ((String) value).split(",");
+            List<String> out = new ArrayList<>();
+            for (String s : parts) {
+                String t = s.trim();
+                if (!t.isEmpty()) out.add(t);
+            }
+            return out;
+        }
+        return null;
+    }
+
+    private String asString(Object value) {
+        if (value == null) return "";
+        return value.toString().trim();
+    }
+
+    private void fireReschedule() {
+        if (onPreferencesChanged != null) {
+            try { onPreferencesChanged.run(); } catch (Exception ignored) {}
+        }
     }
 }
