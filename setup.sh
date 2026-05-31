@@ -62,8 +62,8 @@ select_menu() {
             IFS= read -rsn1 -t 0.01 key2 || true
             IFS= read -rsn1 -t 0.01 key3 || true
             case "${key2}${key3}" in
-                '[A') ((sel--)); [ $sel -lt 0 ] && sel=$((n-1));;
-                '[B') ((sel++)); [ $sel -ge $n ] && sel=0;;
+                '[A') sel=$((sel - 1)); [ $sel -lt 0 ] && sel=$((n-1));;
+                '[B') sel=$((sel + 1)); [ $sel -ge $n ] && sel=0;;
             esac
         elif [[ -z "$key1" ]]; then
             printf '\033[?25h'
@@ -146,6 +146,7 @@ JAVA_VER=$(java -version 2>&1 | head -1)
 ok "Java detected: ${JAVA_VER}"
 
 if [ -f "./mvnw" ]; then
+    chmod +x ./mvnw
     MVN="./mvnw"
     ok "Maven wrapper found (./mvnw)"
 elif command -v mvn &> /dev/null; then

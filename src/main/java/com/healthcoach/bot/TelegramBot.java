@@ -181,17 +181,16 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
         if (resp.choices().isEmpty()) {
             sendText(chatId, resp.text());
         } else {
-            InlineKeyboardRow row = new InlineKeyboardRow();
+            InlineKeyboardMarkup.InlineKeyboardMarkupBuilder kb = InlineKeyboardMarkup.builder();
             for (String choice : resp.choices()) {
-                row.add(InlineKeyboardButton.builder()
-                        .text(choice).callbackData(choice).build());
+                kb.keyboardRow(new InlineKeyboardRow(
+                        InlineKeyboardButton.builder()
+                                .text(choice).callbackData(choice).build()));
             }
-            InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder()
-                    .keyboardRow(row).build();
             try {
                 telegramClient.execute(SendMessage.builder()
                         .chatId(chatId).text(resp.text())
-                        .replyMarkup(markup).build());
+                        .replyMarkup(kb.build()).build());
             } catch (TelegramApiException e) {
                 log.warn("sendWizardResponse failed: {}", e.getMessage());
             }
