@@ -435,7 +435,27 @@ ln -sf "$PROJECT_ABS/healthy" "$HOME/.local/bin/healthy"
 if echo "$PATH" | grep -q "$HOME/.local/bin"; then
     ok "'healthy' command ready"
 else
-    ok "Symlinked to ~/.local/bin/ (add to PATH if not already: export PATH=\"\$HOME/.local/bin:\$PATH\")"
+    # Auto-add to shell profile so 'healthy' works in future sessions
+    EXPORT_LINE='export PATH="$HOME/.local/bin:$PATH"'
+    SHELL_RC=""
+    if [ -n "$ZSH_VERSION" ] || [ "$(basename "$SHELL")" = "zsh" ]; then
+        SHELL_RC="$HOME/.zshrc"
+    elif [ -f "$HOME/.bashrc" ]; then
+        SHELL_RC="$HOME/.bashrc"
+    elif [ -f "$HOME/.bash_profile" ]; then
+        SHELL_RC="$HOME/.bash_profile"
+    fi
+    if [ -n "$SHELL_RC" ]; then
+        if ! grep -qF '.local/bin' "$SHELL_RC" 2>/dev/null; then
+            printf '\n# Added by Health Coach Agent setup\n%s\n' "$EXPORT_LINE" >> "$SHELL_RC"
+        fi
+        ok "Added ~/.local/bin to PATH in $(basename "$SHELL_RC")"
+    else
+        ok "Symlinked to ~/.local/bin/ — add to PATH: $EXPORT_LINE"
+    fi
+    # Also update current session
+    export PATH="$HOME/.local/bin:$PATH"
+    ok "'healthy' command ready"
 fi
 
 echo ""
