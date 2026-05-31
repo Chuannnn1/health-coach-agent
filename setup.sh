@@ -400,6 +400,7 @@ cat > healthy <<LAUNCHER
 #!/bin/bash
 PROJECT_DIR="$PROJECT_ABS"
 PIDFILE="\$PROJECT_DIR/data/bot.pid"
+CONFIG="\$PROJECT_DIR/config.json"
 
 case "\$1" in
   stop)
@@ -416,13 +417,44 @@ case "\$1" in
       echo "No log file found."
     fi
     ;;
+  config)
+    if [ ! -f "\$CONFIG" ]; then
+      echo "config.json not found. Run setup first."
+      exit 1
+    fi
+    EDITOR="\${EDITOR:-\$(command -v nano || command -v vim || command -v vi || echo cat)}"
+    echo "Opening config.json with \$(basename \$EDITOR)..."
+    echo "  (Bot Token, API Key, Chart API Key 等都在這裡)"
+    echo ""
+    "\$EDITOR" "\$CONFIG"
+    ;;
+  status)
+    if [ -f "\$PIDFILE" ] && kill -0 "\$(cat "\$PIDFILE")" 2>/dev/null; then
+      echo "Health Coach Agent is running (PID: \$(cat "\$PIDFILE"))"
+    else
+      echo "Health Coach Agent is not running."
+    fi
+    ;;
+  help|--help|-h)
+    echo "Usage: healthy [command]"
+    echo ""
+    echo "Commands:"
+    echo "  (none)    Start the bot in background"
+    echo "  stop      Stop the bot"
+    echo "  log       Show recent log (last 100 lines)"
+    echo "  config    Edit config.json (API keys, tokens, services)"
+    echo "  status    Check if bot is running"
+    echo "  help      Show this message"
+    ;;
   *)
     cd "\$PROJECT_DIR"
     nohup java -jar target/health-coach-agent.jar > data/bot.log 2>&1 &
     echo \$! > "\$PIDFILE"
     echo "Health Coach Agent started (PID: \$!)"
-    echo "  healthy stop  — stop the bot"
-    echo "  healthy log   — show recent log"
+    echo "  healthy stop    — stop the bot"
+    echo "  healthy log     — show recent log"
+    echo "  healthy config  — edit API keys"
+    echo "  healthy status  — check if running"
     ;;
 esac
 LAUNCHER

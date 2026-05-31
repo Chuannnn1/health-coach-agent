@@ -61,7 +61,10 @@ Setup Wizard 會依序詢問：
 ```bash
 healthy          # 啟動 bot（背景執行）
 healthy stop     # 停止
-healthy log      # 看 log
+healthy log      # 看最近 log
+healthy config   # 編輯 config.json（API Key、Bot Token、Chart Key）
+healthy status   # 檢查 bot 是否在執行
+healthy help     # 顯示指令說明
 ```
 
 啟動後到 Telegram 找你的 bot，發送 `/start` 開始對話。
@@ -152,14 +155,28 @@ Bot 會在設定的時間推送提醒（用餐、訓練、週報）。
 
 ### Optional: Chart API Key
 
-`config.json` 的 `services.chartApiKey` 欄位用於未來的圖表生成功能。
+`config.json` → `services.chartApiKey` 用於圖表生成功能。
 設定後，`/chart` 指令可產生視覺化的每週熱量趨勢圖（PNG），而非純文字表格。
 
-API 選項（擇一）：
-- [QuickChart.io](https://quickchart.io/) — 免費 500 次/月，無需 key 即可使用基本功能
-- 填入 key 後可解鎖更高 rate limit 和自訂樣式
+**如何設定：**
 
-目前 `/chart` 預設以 markdown 文字表格呈現，不需要 chart API key 也能使用。
+```bash
+healthy config    # 會開啟 config.json 編輯器
+```
+
+在 `"services"` 區塊加入 key：
+
+```json
+{
+  "services": {
+    "chartApiKey": "YOUR_QUICKCHART_KEY_HERE"
+  }
+}
+```
+
+**API 選項：**
+- [QuickChart.io](https://quickchart.io/documentation/) — 免費 500 次/月，無需 key 即可使用基本功能；申請 key 可解鎖更高 rate limit
+- 不填也能用 — `/chart` 預設以文字表格呈現
 
 ---
 

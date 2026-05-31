@@ -605,10 +605,37 @@ if "%1"=="log" (
     if exist data\bot.log (type data\bot.log) else (echo No log file found.)
     exit /b
 )
+if "%1"=="config" (
+    if not exist config.json (echo config.json not found. Run setup first. & exit /b 1)
+    echo Opening config.json...
+    echo   (Bot Token, API Key, Chart API Key are here)
+    echo.
+    notepad config.json
+    exit /b
+)
+if "%1"=="status" (
+    tasklist /fi "WINDOWTITLE eq HealthCoach" 2>nul | find /i "java" >nul
+    if %errorlevel%==0 (echo Health Coach Agent is running.) else (echo Health Coach Agent is not running.)
+    exit /b
+)
+if "%1"=="help" (
+    echo Usage: healthy [command]
+    echo.
+    echo Commands:
+    echo   (none)    Start the bot in background
+    echo   stop      Stop the bot
+    echo   log       Show recent log
+    echo   config    Edit config.json (API keys, tokens, services)
+    echo   status    Check if bot is running
+    echo   help      Show this message
+    exit /b
+)
 start "HealthCoach" /min cmd /c "java -jar target\health-coach-agent.jar > data\bot.log 2>&1"
 echo Health Coach Agent started in background.
-echo   healthy stop  — stop the bot
-echo   healthy log   — show log
+echo   healthy stop    — stop the bot
+echo   healthy log     — show log
+echo   healthy config  — edit API keys
+echo   healthy status  — check if running
 "@
 WriteUtf8NoBom 'healthy.cmd' $healthyCmd
 Write-Ok "healthy.cmd created"
