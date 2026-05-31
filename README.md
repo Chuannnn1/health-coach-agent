@@ -1,241 +1,215 @@
 # Health Coach Agent
 
-AI 健康教練 — 支援 Telegram 和 LINE。自動估算熱量、追蹤三大營養素、安排訓練提醒，並能自我學習修正知識。
+AI 健康教練 Telegram Bot — 用 Gemma 4 免費模型自動估算熱量、追蹤三大營養素、安排提醒，支援串流回覆與自我學習。
 
-## Quick Start
+## Prerequisites
 
-```bash
-# 1. 互動式設定（選 channel、填 credentials、選 LLM）
-.\setup.ps1        # Windows PowerShell
-./setup.sh         # macOS / Linux
-
-# 2. 啟動
-java -jar target\health-coach-agent.jar
-```
-
-> 需要 JDK 17+。第一次跑 `mvnw` 會自動下載 Maven。
+- **JDK 17+**（[Adoptium](https://adoptium.net/) 或 `brew install openjdk@17`）
+- **Telegram 帳號**
+- **Google AI Studio API Key**（免費）
 
 ---
 
-## Setup Wizard（6 步）
+## 1. 申請 API Key
+
+### Telegram Bot Token
+
+1. 開啟 Telegram，搜尋 [@BotFather](https://t.me/BotFather)
+2. 發送 `/newbot`，依指示設定名稱
+3. 取得 Bot Token（格式：`123456789:AAF-xxxxxxxxx`）
+
+### Google AI Studio API Key（Gemma 4 免費額度）
+
+1. 前往 [Google AI Studio](https://aistudio.google.com/apikey)
+2. 登入 Google 帳號 → 點選 **Create API Key**
+3. 複製 API Key（格式：`AIza...` 或 `AQ.Ab...`）
+
+> Gemma 4 (31B) 透過 Google AI Studio 完全免費，無需綁定信用卡。
+> 每分鐘 10 次請求 / 每日無上限（Free tier 2025.05 現況）。
+
+---
+
+## 2. 安裝與設定
+
+```bash
+git clone https://github.com/Chuannnn1/health-coach-agent.git
+cd health-coach-agent
+
+# macOS / Linux
+bash setup.sh
+
+# Windows PowerShell
+.\setup.ps1
+```
+
+Setup Wizard 會依序詢問：
 
 | 步驟 | 內容 |
 |------|------|
-| [1/6] | 環境檢查（Java 17+ / Maven） |
-| [2/6] | **選擇 Channel**：Telegram 或 LINE |
-| [3/6] | Channel credentials（根據選擇） |
-| [4/6] | LLM provider（Gemini / OpenRouter） |
-| [5/6] | 提醒設定（時區、餐提醒、訓練提醒） |
-| [6/6] | 寫 config + build jar |
+| 1 | 環境檢查（Java + Maven） |
+| 2 | Telegram Bot Token |
+| 3 | LLM Provider + Model（推薦 Gemma 4 31B） |
+| 4 | 用餐模式 + 時區 |
+| 5 | Build |
 
-所有 secret 輸入時**不會顯示任何字元**（同 Linux 密碼輸入）。
-
----
-
-## Telegram Setup
-
-### 前置作業
-
-1. 在 Telegram 找 [@BotFather](https://t.me/BotFather)
-2. 發 `/newbot` → 取得 **Bot Token**（格式：`123456:ABC-DEF...`）
-3. 記下 bot username
-
-### Setup 流程
-
-```
-.\setup.ps1
-
-[2/6] 選擇 Telegram
-[3/6] 貼上 Bot Token（畫面不會顯示）
-      輸入 Bot Username
-[4/6] 選 LLM provider + model
-[5/6] 設用餐提醒時間
-[6/6] Build
-
-→ java -jar target\health-coach-agent.jar
-→ 到 Telegram 找你的 bot，/start 開始
-```
-
-### config.json 結構
-
-```json
-{
-    "channel": "telegram",
-    "telegram": {
-        "botToken": "123456:ABC-DEF...",
-        "botUsername": "my_bot",
-        "allowedChatIds": []
-    },
-    "llm": { ... },
-    "dataDir": "./data"
-}
-```
-
-Telegram 使用 long polling，不需要公開 IP 或 HTTPS。
+完成後會建立 `healthy` 指令。macOS/Linux 需執行 `source ~/.zshrc`（或 `~/.bashrc`）讓 alias 生效。
 
 ---
 
-## LINE Setup
-
-### 前置作業
-
-1. 到 [LINE Developers Console](https://developers.line.biz/console/) 登入
-2. 建立 Provider → 建立 **Messaging API Channel**
-3. 在 Basic settings 取得 **Channel Secret**（32 字 hex）
-4. 在 Messaging API tab 按 Issue 取得 **Channel Access Token**（長 Base64 字串）
-5. 在 LINE Official Account Manager → 設定：
-   - **關閉** 自動回覆訊息
-   - **開啟** Webhook
-
-### Setup 流程
-
-```
-.\setup.ps1
-
-[2/6] 選擇 LINE
-[3/6] 貼上 Channel Secret（畫面不會顯示）
-      貼上 Channel Access Token（畫面不會顯示）
-      設定 Webhook port（預設 8080）
-[4/6] 選 LLM provider + model
-[5/6] 設用餐提醒時間
-[6/6] Build
-
-→ java -jar target\health-coach-agent.jar
-  (LINE webhook on port 8080)
-```
-
-### 暴露 Webhook URL
-
-LINE 要求 webhook 是 **HTTPS 公開 URL**。開發環境用 tunnel：
+## 3. 啟動與使用
 
 ```bash
-# 方法 A: cloudflared（推薦，免註冊）
-cloudflared tunnel --url http://localhost:8080
-
-# 方法 B: ngrok
-ngrok http 8080
+healthy          # 啟動 bot（背景執行）
+healthy stop     # 停止
+healthy log      # 看 log
 ```
 
-拿到 URL 後（例如 `https://xxx.trycloudflare.com`）：
+啟動後到 Telegram 找你的 bot，發送 `/start` 開始對話。
 
-1. 到 LINE Developers Console → Messaging API → Webhook URL
-2. 填入 `https://xxx.trycloudflare.com/callback`
-3. 按 Verify → 應顯示 Success
-4. 開啟 "Use webhook"
+---
 
-### config.json 結構
+## 4. 使用指南
 
-```json
-{
-    "channel": "line",
-    "line": {
-        "channelSecret": "abc123...(32 hex)",
-        "channelAccessToken": "very-long-base64-string...",
-        "webhookPort": 8080
-    },
-    "llm": { ... },
-    "dataDir": "./data"
-}
+### 基本對話
+
+直接打字告訴 Coach 你吃了什麼，它會自動估算熱量並記錄：
+
+```
+我：中午吃了排骨便當加一杯珍奶
+Coach：已記錄午餐 — 排骨便當 ~750 kcal + 珍奶 ~450 kcal
+       今日累計 1200/2660 kcal，蛋白質 45/169g
+       下一餐建議多補蛋白質...
 ```
 
-### LINE 免費額度
+### 設定個人資料
 
-| 類型 | 計費 |
+```
+/setup    ← 互動式表單，設定身高體重年齡目標
+```
+
+Bot 會自動計算 BMR、TDEE、三大營養素目標。
+
+### 常用指令
+
+| 指令 | 功能 |
 |------|------|
-| Reply（回覆用戶訊息） | 免費無限 |
-| Push（主動發送，如提醒） | 免費 500 則/月 |
-
-提醒功能走 push message，注意月額度。
-
----
-
-## LLM 設定
-
-Setup wizard 的 [4/6] 選 provider：
-
-| Provider | 模型 | endpoint style |
-|----------|------|---------------|
-| Google Gemini API | gemma-4-31b-it, gemini-3.5-flash, etc. | gemini-native / openai |
-| OpenRouter | 任何模型 | openai |
-
-Gemma 模型用 `gemini-native` endpoint（免費 tier）；Gemini 模型用 OpenAI-compat。
-
----
-
-## Slash Commands
-
-| Command | 功能 |
-|---------|------|
 | `/start` | 啟動 Coach |
-| `/setup` | 步驟式設定個人資料（互動表單） |
+| `/setup` | 設定個人資料 |
+| `/today` | 今日紀錄 + 進度條 |
+| `/profile` | 看 BMR/TDEE/Macro |
+| `/analyze` | AI 分析今日狀況 + 建議下一餐 |
+| `/suggest 晚餐` | 推薦晚餐選項 |
+| `/reminders` | 管理用餐/訓練提醒 |
+| `/stop` | 中斷當前串流回覆 |
 | `/new` | 清空對話上下文 |
-| `/profile` | 個人資料 + BMR/TDEE |
-| `/today` | 今日紀錄 + 熱量進度條 |
-| `/memory` | 長期記憶列表 |
-| `/skills` | 知識模組列表 |
-| `/reminders` | 看/改提醒時間 |
-| `/analyze` | LLM 分析今日狀況 |
-| `/suggest <餐>` | 推薦下一餐 |
 | `/help` | 指令清單 |
 
----
+### 提醒系統
 
-## Knowledge Skills
-
-Agent 的知識存在 `data/skills/*/SKILL.md`，隨時可擴充：
-
-| Skill | 內容 |
-|-------|------|
-| `nutrition-advice` | 台灣常見食物熱量、三大營養素分配 |
-| `workout-planning` | 推拉腿/上下肢分化、組數次數建議 |
-| `fat-loss-program` | 減脂熱量赤字、macro 分配、訓練策略 |
-| `muscle-building` | 增肌盈餘、漸進式超負荷、訓練量建議 |
-| `body-composition` | 先增先減決策樹、體脂率估算、新手策略 |
-| `reminder-management` | PATCH 指令格式參考 |
-
-LLM 會在回覆中用 `<PATCH>` 標籤自動修正知識。
+Bot 會在設定的時間推送提醒（用餐、訓練、週報）。
+用 `/reminders` 或直接說「以後只要午餐跟晚餐提醒」即可修改。
 
 ---
 
-## Architecture
+## 5. 設定檔說明
 
-```
-User → [Telegram LongPoll / LINE Webhook]
-              ↓
-        AgentCore.chatStream()  ← streamGenerateContent SSE
-              ↓ (onDelta)
-        StreamingConsumer  → editMessageText progressive edit
-              ↓ (finish)
-        PatchExecutor.execute()  → mutate stores + PatchListener callback
-              ↓
-        ResponseSanitizer.sanitize()  → 三層過濾
-              ↓
-        editFinal() → User
-```
+### config.json（gitignored，不會被 push）
 
-Interactive:
-- `/setup` → ProfileWizard state machine → InlineKeyboard (TG) / text (LINE)
-- PatchListener → real-time status messages (meal logged, profile updated)
-
-Memory layers:
-- Layer 1: `user_profile.json` + `memory.json`
-- Layer 2: `skills/*/SKILL.md`
-- Layer 3: `logs/yyyy-MM-dd.json`
-- Preferences: `preferences.json`
-
----
-
-## Testing
-
-```bash
-./mvnw test    # 164 tests, all use @TempDir
+```json
+{
+  "channel": "telegram",
+  "telegram": {
+    "botToken": "YOUR_BOT_TOKEN",
+    "botUsername": "your_bot_name",
+    "allowedChatIds": []
+  },
+  "llm": {
+    "apiKey": "YOUR_GOOGLE_AI_STUDIO_KEY",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+    "model": "gemma-4-31b-it",
+    "endpointStyle": "gemini-native",
+    "effort": "medium",
+    "maxTokens": 1000,
+    "temperature": 0.7
+  },
+  "services": {
+    "chartApiKey": ""
+  },
+  "dataDir": "./data"
+}
 ```
 
+### data/preferences.json（gitignored）
+
+```json
+{
+  "timezone": "Asia/Taipei",
+  "mealReminders": ["07:30", "12:00", "18:00"],
+  "workoutReminder": "20:00",
+  "weeklySummary": "SUN 21:00"
+}
+```
+
+### Optional: Chart API Key
+
+`config.json` 的 `services.chartApiKey` 欄位用於未來的圖表生成功能。
+設定後，`/chart` 指令可產生視覺化的每週熱量趨勢圖（PNG），而非純文字表格。
+
+API 選項（擇一）：
+- [QuickChart.io](https://quickchart.io/) — 免費 500 次/月，無需 key 即可使用基本功能
+- 填入 key 後可解鎖更高 rate limit 和自訂樣式
+
+目前 `/chart` 預設以 markdown 文字表格呈現，不需要 chart API key 也能使用。
+
 ---
 
-## Security
+## 6. 資料儲存
 
-- `config.json` 已 gitignore，不會被推到 GitHub
-- Setup wizard 輸入 secret 時完全不顯示字元
-- System prompt 含 prompt injection 防護（角色鎖定 + 命令偵測 + 社會工程免疫）
-- Response 三層過濾：API field filter → think tag strip → regex safety net
+所有使用者資料都在本機 `data/` 目錄，不會上傳：
+
+| 檔案 | 內容 |
+|------|------|
+| `data/user_profile.json` | 身高體重年齡 + BMR/TDEE |
+| `data/memory.json` | AI 長期記憶（飲食偏好等） |
+| `data/preferences.json` | 提醒時間、時區 |
+| `data/logs/yyyy-MM-dd.json` | 每日飲食紀錄 |
+| `data/skills/` | 知識模組（可擴充） |
+
+---
+
+## 7. 進階設定
+
+### Reasoning Effort
+
+在 Telegram 用 `/effort low|medium|high` 調整回覆品質：
+
+| 等級 | 效果 |
+|------|------|
+| `low` | 直覺回覆，最快 |
+| `medium` | 預設，平衡品質與速度 |
+| `high` | 深度推理，較慢 |
+
+### 知識模組擴充
+
+在 `data/skills/` 下建立資料夾 + `SKILL.md`：
+
+```
+data/skills/my-custom-skill/SKILL.md
+```
+
+Bot 會自動載入並在需要時參考。用 `/skills` 查看已載入的模組。
+
+---
+
+## Tech Stack
+
+- Java 17 + Maven
+- Telegram Bot API (Long Polling)
+- Google AI Studio (Gemma 4 / Gemini)
+- Streaming SSE + Progressive Edit
+
+---
+
+## License
+
+MIT
