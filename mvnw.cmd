@@ -58,7 +58,7 @@ if not exist "!ZIPFILE!" (
 powershell.exe -NoProfile -Command "Expand-Archive -Force -LiteralPath '!ZIPFILE!' -DestinationPath '!INSTALL_DIR!'"
 del "!ZIPFILE!" 2>nul
 
-@REM Verify boot jar (using dir /b — NOT for-in with wildcards which don't expand when quoted)
+@REM Verify boot jar (using dir /b - NOT for-in with wildcards which don't expand when quoted)
 set "BOOT_JAR="
 for /f "delims=" %%J in ('dir /b "%MAVEN_HOME%\boot\plexus-classworlds-*.jar" 2^>nul') do set "BOOT_JAR=%%J"
 if not defined BOOT_JAR (

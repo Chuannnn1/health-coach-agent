@@ -203,6 +203,17 @@ function WriteUtf8NoBom($relPath, $content) {
     [System.IO.File]::WriteAllText($abs, $content, [System.Text.UTF8Encoding]::new($false))
 }
 
+# Batch files require CRLF — cmd.exe parses LF-only batch files wrong (`@REM` → `EM`, etc.)
+function WriteBatchFile($relPath, $content) {
+    $abs = Abs $relPath
+    $dir = Split-Path $abs -Parent
+    if ($dir -and -not (Test-Path $dir)) {
+        $null = New-Item -ItemType Directory -Force -Path $dir
+    }
+    $normalized = $content -replace "`r`n", "`n" -replace "`r", "`n" -replace "`n", "`r`n"
+    [System.IO.File]::WriteAllBytes($abs, [System.Text.Encoding]::ASCII.GetBytes($normalized))
+}
+
 # ----- Resume support: load existing config.json + preferences.json if any -----
 $saved = @{
     channel = 'telegram'
@@ -637,8 +648,8 @@ echo   healthy log     — show log
 echo   healthy config  — edit API keys
 echo   healthy status  — check if running
 "@
-WriteUtf8NoBom 'healthy.cmd' $healthyCmd
-Write-Ok "healthy.cmd created"
+WriteBatchFile 'healthy.cmd' $healthyCmd
+Write-Ok "healthy.cmd created (CRLF)"
 
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 if (-not $userPath) { $userPath = '' }
