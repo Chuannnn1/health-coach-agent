@@ -48,7 +48,16 @@ select_menu() {
 
     printf '  %s(↑/↓ 選擇，Enter 確認)%s\n' "$DIM" "$RESET"
     printf '  %s%s%s\n' "$BOLD" "$title" "$RESET"
-    printf '\033[s'  # save cursor position before options
+
+    # Query absolute cursor row via DSR before drawing options
+    local start_row=""
+    printf '\033[6n' > /dev/tty 2>/dev/null
+    local _dsr=""
+    IFS='' read -rs -d R -t 1 _dsr < /dev/tty 2>/dev/null || true
+    if [[ "$_dsr" =~ \[([0-9]+)\;([0-9]+) ]]; then
+        start_row="${BASH_REMATCH[1]}"
+    fi
+
     for i in "${!opts[@]}"; do
         if [ "$i" -eq "$sel" ]; then
             printf '  %s> %s%s\n' "$GREEN" "${opts[$i]}" "$RESET"
@@ -73,8 +82,13 @@ select_menu() {
             return 0
         fi
 
-        printf '\033[u'  # restore cursor to start of options
-        printf '\033[J'  # clear from cursor to end of screen
+        # Move to absolute start row (DSR) or fall back to cursor-up
+        if [ -n "$start_row" ]; then
+            printf '\033[%d;1H' "$start_row"
+        else
+            printf '\033[%dA' "$n"
+        fi
+        printf '\033[J'  # clear to end of screen
         for i in "${!opts[@]}"; do
             if [ "$i" -eq "$sel" ]; then
                 printf '  %s> %s%s\n' "$GREEN" "${opts[$i]}" "$RESET"
