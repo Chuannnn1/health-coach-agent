@@ -22,29 +22,23 @@ if not defined DISTRIBUTION_URL (
   exit /b 1
 )
 
-@REM Extract filename from URL: take everything after last slash, strip .zip, strip -bin
-set "URL_TAIL=%DISTRIBUTION_URL%"
-:strip_slash
-  set "PREV=%URL_TAIL%"
-  for /f "tokens=1* delims=/" %%A in ("%URL_TAIL%") do set "URL_TAIL=%%B"
-  if defined URL_TAIL goto :strip_slash
-@REM PREV now holds the last path component, e.g. apache-maven-3.9.9-bin.zip
-set "ZIP_FILENAME=%PREV%"
+@REM Use PowerShell to extract filename from URL (reliable, handles any URL format)
+for /f "delims=" %%F in ('powershell -NoProfile -Command "([uri]'%DISTRIBUTION_URL%').Segments[-1]"') do set "ZIP_FILENAME=%%F"
 set "ZIP_NAME=%ZIP_FILENAME:.zip=%"
 set "DIST_BASE=%ZIP_NAME:-bin=%"
 
 set "INSTALL_DIR=%USERPROFILE%\.m2\wrapper\dists\%ZIP_NAME%"
 set "MAVEN_HOME=%INSTALL_DIR%\%DIST_BASE%"
 
-@REM Check whether a valid install exists (mvn.cmd + boot jar both present)
+@REM Check installation integrity: use dir /b so quoted wildcards expand properly
 set "BOOT_JAR="
-for %%J in ("%MAVEN_HOME%\boot\plexus-classworlds-*.jar") do set "BOOT_JAR=%%J"
+for /f "delims=" %%J in ('dir /b "%MAVEN_HOME%\boot\plexus-classworlds-*.jar" 2^>nul') do set "BOOT_JAR=%%J"
 
 if exist "%MAVEN_HOME%\bin\mvn.cmd" if defined BOOT_JAR goto :run
 
-@REM Install (or re-install if boot jar was missing)
+@REM Re-install (wipe incomplete install if any)
 if exist "%INSTALL_DIR%" (
-  echo Re-downloading Maven (previous install incomplete)...
+  echo Removing incomplete Maven install...
   rmdir /s /q "%INSTALL_DIR%" 2>nul
 )
 echo Downloading Maven from %DISTRIBUTION_URL% ...
@@ -64,13 +58,13 @@ if not exist "!ZIPFILE!" (
 powershell.exe -NoProfile -Command "Expand-Archive -Force -LiteralPath '!ZIPFILE!' -DestinationPath '!INSTALL_DIR!'"
 del "!ZIPFILE!" 2>nul
 
-@REM Verify boot jar after extraction
+@REM Verify boot jar (using dir /b — NOT for-in with wildcards which don't expand when quoted)
 set "BOOT_JAR="
-for %%J in ("%MAVEN_HOME%\boot\plexus-classworlds-*.jar") do set "BOOT_JAR=%%J"
+for /f "delims=" %%J in ('dir /b "%MAVEN_HOME%\boot\plexus-classworlds-*.jar" 2^>nul') do set "BOOT_JAR=%%J"
 if not defined BOOT_JAR (
   echo Waiting for filesystem flush...
   timeout /t 5 /nobreak >nul 2>nul
-  for %%J in ("%MAVEN_HOME%\boot\plexus-classworlds-*.jar") do set "BOOT_JAR=%%J"
+  for /f "delims=" %%J in ('dir /b "%MAVEN_HOME%\boot\plexus-classworlds-*.jar" 2^>nul') do set "BOOT_JAR=%%J"
 )
 if not defined BOOT_JAR (
   echo Extraction failed: boot jar not found in %MAVEN_HOME%\boot 1>&2
