@@ -429,33 +429,25 @@ LAUNCHER
 chmod +x healthy
 ok "healthy launcher created"
 
-# Symlink to ~/.local/bin for PATH access
-mkdir -p "$HOME/.local/bin"
-ln -sf "$PROJECT_ABS/healthy" "$HOME/.local/bin/healthy"
-if echo "$PATH" | grep -q "$HOME/.local/bin"; then
-    ok "'healthy' command ready"
+# Register 'healthy' command via shell alias
+SHELL_RC=""
+if [ -n "$ZSH_VERSION" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
+    SHELL_RC="$HOME/.zshrc"
+elif [ -f "$HOME/.bash_profile" ]; then
+    SHELL_RC="$HOME/.bash_profile"
+elif [ -f "$HOME/.bashrc" ]; then
+    SHELL_RC="$HOME/.bashrc"
+fi
+ALIAS_LINE="alias healthy='$PROJECT_ABS/healthy'"
+if [ -n "$SHELL_RC" ]; then
+    # Remove old alias if present, then add fresh one
+    sed -i.bak '/alias healthy=/d' "$SHELL_RC" 2>/dev/null || true
+    sed -i.bak '/# Health Coach Agent launcher/d' "$SHELL_RC" 2>/dev/null || true
+    rm -f "${SHELL_RC}.bak"
+    printf '\n# Health Coach Agent launcher\n%s\n' "$ALIAS_LINE" >> "$SHELL_RC"
+    ok "alias healthy 已寫入 $(basename "$SHELL_RC")"
 else
-    # Auto-add to shell profile so 'healthy' works in future sessions
-    EXPORT_LINE='export PATH="$HOME/.local/bin:$PATH"'
-    SHELL_RC=""
-    if [ -n "$ZSH_VERSION" ] || [ "$(basename "$SHELL")" = "zsh" ]; then
-        SHELL_RC="$HOME/.zshrc"
-    elif [ -f "$HOME/.bashrc" ]; then
-        SHELL_RC="$HOME/.bashrc"
-    elif [ -f "$HOME/.bash_profile" ]; then
-        SHELL_RC="$HOME/.bash_profile"
-    fi
-    if [ -n "$SHELL_RC" ]; then
-        if ! grep -qF '.local/bin' "$SHELL_RC" 2>/dev/null; then
-            printf '\n# Added by Health Coach Agent setup\n%s\n' "$EXPORT_LINE" >> "$SHELL_RC"
-        fi
-        ok "Added ~/.local/bin to PATH in $(basename "$SHELL_RC")"
-    else
-        ok "Symlinked to ~/.local/bin/ — add to PATH: $EXPORT_LINE"
-    fi
-    # Also update current session
-    export PATH="$HOME/.local/bin:$PATH"
-    ok "'healthy' command ready"
+    ok "請手動加入 shell profile: $ALIAS_LINE"
 fi
 
 echo ""
@@ -463,6 +455,11 @@ echo "${GREEN}${BOLD}==============================================${RESET}"
 echo "${GREEN}${BOLD}   Setup 完成！${RESET}"
 echo "${GREEN}${BOLD}==============================================${RESET}"
 echo ""
+if [ -n "$SHELL_RC" ]; then
+    echo "  ${YELLOW}▶ 執行以下指令讓 alias 立刻生效：${RESET}"
+    echo "    ${CYAN}source ~/${SHELL_RC##*/}${RESET}"
+    echo ""
+fi
 echo "  下一步："
 echo "    ${CYAN}healthy${RESET}          — 啟動 bot（背景執行）"
 echo "    ${CYAN}healthy stop${RESET}     — 停止 bot"
