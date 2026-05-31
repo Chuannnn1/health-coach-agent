@@ -3,6 +3,8 @@
 @REM Uses maven-wrapper.jar (committed to .mvn/wrapper/) to bootstrap Maven
 @REM ----------------------------------------------------------------------------
 @echo off
+@REM Use UTF-8 code page so paths with Chinese characters resolve correctly
+chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
 set "MAVEN_PROJECTBASEDIR=%~dp0"
