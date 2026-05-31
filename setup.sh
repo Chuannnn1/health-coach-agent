@@ -48,6 +48,7 @@ select_menu() {
 
     printf '  %s(↑/↓ 選擇，Enter 確認)%s\n' "$DIM" "$RESET"
     printf '  %s%s%s\n' "$BOLD" "$title" "$RESET"
+    printf '\033[s'  # save cursor position before options
     for i in "${!opts[@]}"; do
         if [ "$i" -eq "$sel" ]; then
             printf '  %s> %s%s\n' "$GREEN" "${opts[$i]}" "$RESET"
@@ -72,9 +73,9 @@ select_menu() {
             return 0
         fi
 
-        printf '\033[%dA' "$n"
+        printf '\033[u'  # restore cursor to start of options
+        printf '\033[J'  # clear from cursor to end of screen
         for i in "${!opts[@]}"; do
-            printf '\033[2K'
             if [ "$i" -eq "$sel" ]; then
                 printf '  %s> %s%s\n' "$GREEN" "${opts[$i]}" "$RESET"
             else

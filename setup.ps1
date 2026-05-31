@@ -107,7 +107,7 @@ function Confirm-Action($prompt, $defaultYes) {
     return ($reply -match '^[Yy]')
 }
 
-# ----- Arrow-key menu (absolute cursor positioning, scroll-safe) -----
+# ----- Arrow-key menu (tracks actual cursor rows, handles text wrapping) -----
 function Select-Menu {
     param(
         [string]$Title,
@@ -118,40 +118,42 @@ function Select-Menu {
 
     $bw = [Console]::BufferWidth
     if ($bw -le 0) { $bw = 80 }
+    $blankLine = ' ' * ($bw - 1)
 
     [Console]::CursorVisible = $false
     try {
         Write-Host "  (UP/DOWN 選擇, Enter 確認)" -ForegroundColor DarkGray
         Write-Host "  $Title" -ForegroundColor White
 
-        # Reserve (n+1) blank rows. This forces any necessary scroll to happen
-        # NOW, before we capture the start row — so subsequent SetCursorPosition
-        # calls always land on valid rows even if the console scrolled.
-        for ($i = 0; $i -lt ($n + 1); $i++) { Write-Host "" }
-        $startRow = [Console]::CursorTop - $n - 1
-
-        $blankLine = ' ' * ($bw - 1)
+        # Reserve generous space to force any scroll before we capture startRow
+        $reserve = $n * 2 + 1
+        for ($i = 0; $i -lt $reserve; $i++) { Write-Host "" }
+        $startRow = [Console]::CursorTop - $reserve
+        $endRow = $startRow
 
         while ($true) {
-            for ($i = 0; $i -lt $n; $i++) {
-                [Console]::SetCursorPosition(0, $startRow + $i)
+            # Clear previous render area
+            for ($r = $startRow; $r -lt $endRow; $r++) {
+                [Console]::SetCursorPosition(0, $r)
                 [Console]::Write($blankLine)
-                [Console]::SetCursorPosition(0, $startRow + $i)
+            }
+            [Console]::SetCursorPosition(0, $startRow)
+
+            for ($i = 0; $i -lt $n; $i++) {
                 if ($i -eq $sel) {
-                    Write-Host ("  > " + $Options[$i]) -ForegroundColor Green -NoNewline
+                    Write-Host ("  > " + $Options[$i]) -ForegroundColor Green
                 } else {
-                    Write-Host ("    " + $Options[$i]) -ForegroundColor Gray -NoNewline
+                    Write-Host ("    " + $Options[$i]) -ForegroundColor Gray
                 }
             }
-            # Park cursor below menu so any next output doesn't overlap
-            [Console]::SetCursorPosition(0, $startRow + $n)
+            $endRow = [Console]::CursorTop
 
             $key = [Console]::ReadKey($true)
             switch ($key.Key) {
                 'UpArrow'   { $sel--; if ($sel -lt 0)  { $sel = $n - 1 } }
                 'DownArrow' { $sel++; if ($sel -ge $n) { $sel = 0 } }
                 'Enter'     {
-                    [Console]::SetCursorPosition(0, $startRow + $n)
+                    [Console]::SetCursorPosition(0, $endRow)
                     Write-Host ""
                     return $sel
                 }
