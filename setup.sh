@@ -14,7 +14,7 @@ BLUE=$'\033[34m'
 RESET=$'\033[0m'
 
 # ----- Restore cursor on exit (in case user Ctrl+C during menu) -----
-trap 'printf "\033[?25h\033[?7h" 2>/dev/null; exit' INT TERM
+trap 'printf "\033[?25h" 2>/dev/null; exit' INT TERM
 
 banner() {
     echo ""
@@ -34,7 +34,7 @@ ok()   { echo "  ${GREEN}OK${RESET}  $1"; }
 warn() { echo "  ${YELLOW}!!${RESET}  $1"; }
 err()  { echo "  ${RED}XX${RESET}  $1"; }
 
-# ----- Bullet-point arrow-key menu -----
+# ----- Bullet-point arrow-key menu (golem-style) -----
 # Usage: select_menu "Title" "opt1" "opt2" "opt3" ...
 # Sets globals: SELECTED_INDEX, SELECTED_VALUE
 select_menu() {
@@ -42,47 +42,50 @@ select_menu() {
     local opts=("$@")
     local sel=0
     local n=${#opts[@]}
-    local key1 key2 key3
 
-    printf '\033[?25l'  # hide cursor
-    printf '\033[?7l'   # disable line wrapping (each option = exactly 1 row)
+    printf '\033[?25l'
 
-    printf '  %s(↑/↓ 選擇，Enter 確認)%s\n' "$DIM" "$RESET"
-    printf '  %s%s%s\n' "$BOLD" "$title" "$RESET"
-    for i in "${!opts[@]}"; do
-        if [ "$i" -eq "$sel" ]; then
-            printf '  %s> %s%s\n' "$GREEN" "${opts[$i]}" "$RESET"
-        else
-            printf '    %s\n' "${opts[$i]}"
-        fi
-    done
+    _sm_draw() {
+        printf '  %s%s%s\n' "$BOLD" "$title" "$RESET"
+        for i in "${!opts[@]}"; do
+            if [ "$i" -eq "$sel" ]; then
+                printf '  %s❯ ◉ %s%s\n' "$CYAN" "${opts[$i]}" "$RESET"
+            else
+                printf '    ○ %s\n' "${opts[$i]}"
+            fi
+        done
+        printf '  %s(↑/↓ 選擇，Enter 確認)%s\n' "$DIM" "$RESET"
+    }
+
+    _sm_clear() {
+        local total=$((n + 2))
+        for ((j=0; j<total; j++)); do
+            printf '\033[1A\r\033[2K'
+        done
+    }
+
+    _sm_draw
 
     while true; do
-        IFS= read -rsn1 key1
-        if [[ "$key1" == $'\x1b' ]]; then
-            IFS= read -rsn1 -t 0.01 key2 || true
-            IFS= read -rsn1 -t 0.01 key3 || true
-            case "${key2}${key3}" in
-                '[A') sel=$((sel - 1)); [ $sel -lt 0 ] && sel=$((n-1));;
-                '[B') sel=$((sel + 1)); [ $sel -ge $n ] && sel=0;;
-            esac
-        elif [[ -z "$key1" ]]; then
-            printf '\033[?25h'  # show cursor
-            printf '\033[?7h'   # re-enable line wrapping
+        local key seq
+        IFS= read -rsn1 key
+
+        if [[ "$key" == $'\x1b' ]]; then
+            read -rsn2 -t 1 seq 2>/dev/null || true
+            if [[ "$seq" == "[A" ]] || [[ "$seq" == "OA" ]]; then
+                sel=$((sel - 1)); [ $sel -lt 0 ] && sel=$((n - 1))
+            elif [[ "$seq" == "[B" ]] || [[ "$seq" == "OB" ]]; then
+                sel=$((sel + 1)); [ $sel -ge $n ] && sel=0
+            fi
+        elif [[ -z "$key" ]]; then
+            printf '\033[?25h'
             SELECTED_INDEX=$sel
             SELECTED_VALUE="${opts[$sel]}"
             return 0
         fi
 
-        printf '\033[%dA' "$n"
-        for i in "${!opts[@]}"; do
-            printf '\033[2K'
-            if [ "$i" -eq "$sel" ]; then
-                printf '  %s> %s%s\n' "$GREEN" "${opts[$i]}" "$RESET"
-            else
-                printf '    %s\n' "${opts[$i]}"
-            fi
-        done
+        _sm_clear
+        _sm_draw
     done
 }
 
