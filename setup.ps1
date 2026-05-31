@@ -606,47 +606,60 @@ Write-Ok "Build complete"
 # ----- Generate 'healthy' launcher -----
 $healthyCmd = @"
 @echo off
-cd /d "$ProjectRoot"
-if "%1"=="stop" (
-    taskkill /fi "WINDOWTITLE eq HealthCoach" /f >nul 2>&1
-    echo Health Coach Agent stopped.
-    exit /b
-)
-if "%1"=="log" (
-    if exist data\bot.log (type data\bot.log) else (echo No log file found.)
-    exit /b
-)
-if "%1"=="config" (
-    if not exist config.json (echo config.json not found. Run setup first. & exit /b 1)
-    echo Opening config.json...
-    echo   (Bot Token, API Key, Chart API Key are here)
-    echo.
-    notepad config.json
-    exit /b
-)
-if "%1"=="status" (
-    tasklist /fi "WINDOWTITLE eq HealthCoach" 2>nul | find /i "java" >nul
-    if %errorlevel%==0 (echo Health Coach Agent is running.) else (echo Health Coach Agent is not running.)
-    exit /b
-)
-if "%1"=="help" (
-    echo Usage: healthy [command]
-    echo.
-    echo Commands:
-    echo   (none)    Start the bot in background
-    echo   stop      Stop the bot
-    echo   log       Show recent log
-    echo   config    Edit config.json (API keys, tokens, services)
-    echo   status    Check if bot is running
-    echo   help      Show this message
-    exit /b
-)
+setlocal enabledelayedexpansion
+cd /d "$ProjectRoot" || exit /b 1
+set "CMD=%~1"
+if "!CMD!"=="" goto :run
+if /i "!CMD!"=="stop"   goto :stop
+if /i "!CMD!"=="log"    goto :log
+if /i "!CMD!"=="config" goto :config
+if /i "!CMD!"=="status" goto :status
+if /i "!CMD!"=="help"   goto :help
+echo Unknown command: %1
+echo Usage: healthy [stop^|log^|config^|status^|help]
+exit /b 1
+
+:stop
+taskkill /fi "WINDOWTITLE eq HealthCoach" /f >nul 2>&1
+echo Health Coach Agent stopped.
+exit /b
+
+:log
+if exist data\bot.log (type data\bot.log) else (echo No log file found.)
+exit /b
+
+:config
+if not exist config.json (echo config.json not found. Run setup first. & exit /b 1)
+echo Opening config.json...
+echo   (Bot Token, API Key, Chart API Key are here)
+echo.
+notepad config.json
+exit /b
+
+:status
+tasklist /fi "WINDOWTITLE eq HealthCoach" 2>nul | find /i "java" >nul
+if %errorlevel%==0 (echo Health Coach Agent is running.) else (echo Health Coach Agent is not running.)
+exit /b
+
+:help
+echo Usage: healthy [command]
+echo.
+echo Commands:
+echo   (none)    Start the bot in background
+echo   stop      Stop the bot
+echo   log       Show recent log
+echo   config    Edit config.json (API keys, tokens, services)
+echo   status    Check if bot is running
+echo   help      Show this message
+exit /b
+
+:run
 start "HealthCoach" /min cmd /c "java -jar target\health-coach-agent.jar > data\bot.log 2>&1"
 echo Health Coach Agent started in background.
 echo   healthy stop    — stop the bot
 echo   healthy log     — show log
 echo   healthy config  — edit API keys
-echo   healthy status  — check if running
+echo   healthy status  — check if running"
 "@
 WriteBatchFile 'healthy.cmd' $healthyCmd
 Write-Ok "healthy.cmd created (CRLF)"
