@@ -14,7 +14,7 @@ BLUE=$'\033[34m'
 RESET=$'\033[0m'
 
 # ----- Restore cursor on exit (in case user Ctrl+C during menu) -----
-trap 'printf "\033[?25h" 2>/dev/null; exit' INT TERM
+trap 'printf "\033[?25h\033[?7h" 2>/dev/null; exit' INT TERM
 
 banner() {
     echo ""
@@ -45,19 +45,10 @@ select_menu() {
     local key1 key2 key3
 
     printf '\033[?25l'  # hide cursor
+    printf '\033[?7l'   # disable line wrapping (each option = exactly 1 row)
 
     printf '  %s(↑/↓ 選擇，Enter 確認)%s\n' "$DIM" "$RESET"
     printf '  %s%s%s\n' "$BOLD" "$title" "$RESET"
-
-    # Query absolute cursor row via DSR before drawing options
-    local start_row=""
-    printf '\033[6n' > /dev/tty 2>/dev/null
-    local _dsr=""
-    IFS='' read -rs -d R -t 1 _dsr < /dev/tty 2>/dev/null || true
-    if [[ "$_dsr" =~ \[([0-9]+)\;([0-9]+) ]]; then
-        start_row="${BASH_REMATCH[1]}"
-    fi
-
     for i in "${!opts[@]}"; do
         if [ "$i" -eq "$sel" ]; then
             printf '  %s> %s%s\n' "$GREEN" "${opts[$i]}" "$RESET"
@@ -76,20 +67,16 @@ select_menu() {
                 '[B') sel=$((sel + 1)); [ $sel -ge $n ] && sel=0;;
             esac
         elif [[ -z "$key1" ]]; then
-            printf '\033[?25h'
+            printf '\033[?25h'  # show cursor
+            printf '\033[?7h'   # re-enable line wrapping
             SELECTED_INDEX=$sel
             SELECTED_VALUE="${opts[$sel]}"
             return 0
         fi
 
-        # Move to absolute start row (DSR) or fall back to cursor-up
-        if [ -n "$start_row" ]; then
-            printf '\033[%d;1H' "$start_row"
-        else
-            printf '\033[%dA' "$n"
-        fi
-        printf '\033[J'  # clear to end of screen
+        printf '\033[%dA' "$n"
         for i in "${!opts[@]}"; do
+            printf '\033[2K'
             if [ "$i" -eq "$sel" ]; then
                 printf '  %s> %s%s\n' "$GREEN" "${opts[$i]}" "$RESET"
             else
