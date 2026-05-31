@@ -644,22 +644,23 @@ $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 if (-not $userPath) { $userPath = '' }
 if ($userPath -notlike "*$ProjectRoot*") {
     [Environment]::SetEnvironmentVariable('PATH', ($userPath.TrimEnd(';') + ";$ProjectRoot"), 'User')
-    $env:PATH += ";$ProjectRoot"
-    Write-Ok "Added to PATH ('healthy' command ready)"
-} else {
-    if ($env:PATH -notlike "*$ProjectRoot*") { $env:PATH += ";$ProjectRoot" }
-    Write-Ok "'healthy' command ready"
+    Write-Ok "已寫入 User PATH（下次開新視窗即可直接用 healthy）"
 }
+# Always update current session regardless
+if ($env:PATH -notlike "*$ProjectRoot*") { $env:PATH += ";$ProjectRoot" }
 
 Write-Host ""
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "   Setup 完成" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  下一步:" -ForegroundColor White
-Write-Host "    healthy          — 啟動 bot（背景執行）" -ForegroundColor Cyan
+Write-Host "  啟動 bot：" -ForegroundColor White
+Write-Host "    healthy          — 啟動（背景執行）" -ForegroundColor Cyan
 Write-Host "    healthy stop     — 停止 bot" -ForegroundColor Cyan
 Write-Host "    healthy log      — 查看 log" -ForegroundColor Cyan
+Write-Host "    healthy config   — 修改 API Key / Token" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  此視窗可直接輸入 healthy 啟動，或開新 PowerShell 視窗都可使用。" -ForegroundColor Yellow
 Write-Host ""
 if ($selectedChannel -eq "telegram") {
     Write-Host "  到 Telegram 找你的 bot, /start 開始對話" -ForegroundColor DarkGray
