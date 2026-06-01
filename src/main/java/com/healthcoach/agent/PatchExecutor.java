@@ -12,6 +12,8 @@ import com.healthcoach.model.MealEntry;
 import com.healthcoach.model.PatchInstruction;
 import com.healthcoach.model.Preferences;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -104,9 +106,15 @@ public class PatchExecutor {
                 }
                 MealEntry meal = new MealEntry(li.time, li.description,
                         li.estimatedKcal, li.proteinG, li.carbsG, li.fatG, "llm_estimate");
-                dailyLogStore.addMeal(meal);
-                patchResults.add("meal logged: " + li.description);
-                fireListener(false, "meal logged: " + li.description + " " + li.estimatedKcal + " kcal");
+                LocalDate targetDate = LocalDate.now();
+                String dateLabel = "";
+                if (li.date != null && !li.date.isBlank()) {
+                    targetDate = LocalDate.parse(li.date, DateTimeFormatter.ISO_LOCAL_DATE);
+                    dateLabel = " (" + li.date + ")";
+                }
+                dailyLogStore.addMeal(targetDate, meal);
+                patchResults.add("meal logged: " + li.description + dateLabel);
+                fireListener(false, "meal logged: " + li.description + " " + li.estimatedKcal + " kcal" + dateLabel);
             } catch (Exception ex) {
                 patchResults.add("LOG failed: " + ex.getMessage());
             }

@@ -76,7 +76,12 @@ public class DailyLogStore {
 
     /** Append a meal to today's log, refresh meal-side summary totals, then persist. */
     public void addMeal(MealEntry meal) {
-        DailyLog log = loadToday();
+        addMeal(LocalDate.now(), meal);
+    }
+
+    /** Append a meal to a specific date's log, refresh totals, then persist. */
+    public void addMeal(LocalDate date, MealEntry meal) {
+        DailyLog log = loadDate(date);
         log.meals.add(meal);
         sumMealTotals(log);
         saveLog(log);
