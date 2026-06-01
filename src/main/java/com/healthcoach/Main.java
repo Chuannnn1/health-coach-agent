@@ -79,6 +79,7 @@ public class Main {
         }
         ChartService chartService = new ChartService(dailyLogStore, memoryStore, chartApiKey);
         slashRouter.setChartService(chartService);
+        slashRouter.setModelName(llmCfg.get("model").getAsString());
 
         ProfileWizard profileWizard = new ProfileWizard(memoryStore);
         profileWizard.setAssessor(prompt -> {

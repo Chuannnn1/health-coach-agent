@@ -47,6 +47,7 @@ public class SlashRouter {
             "/analyze — 分析今日熱量狀況並建議下一餐\n" +
             "/suggest <早餐|午餐|晚餐|宵夜> — 根據偏好給建議\n" +
             "/resume — 查看目前對話上下文（重啟後自動恢復）\n" +
+            "/status — 當前 session 狀態總覽\n" +
             "/chart — 本週飲食趨勢圖（有 API 則送 PNG，否則文字表格）\n" +
             "/help — 顯示這份指令清單";
 
@@ -76,6 +77,7 @@ public class SlashRouter {
     private final PreferencesStore preferencesStore;  // nullable for legacy tests
     private final Runnable onPreferencesChanged;       // nullable
     private ChartService chartService;                 // nullable
+    private String modelName = "";                     // set from config
 
     /** Legacy constructor (no /reminders support). */
     public SlashRouter(MemoryStore memoryStore, SkillManager skillManager,
@@ -97,6 +99,10 @@ public class SlashRouter {
 
     public void setChartService(ChartService chartService) {
         this.chartService = chartService;
+    }
+
+    public void setModelName(String modelName) {
+        this.modelName = modelName == null ? "" : modelName;
     }
 
     /** Dispatch a possible slash command. Returns NotHandled if text is not a slash command we know. */
@@ -128,6 +134,8 @@ public class SlashRouter {
                 return new Action.Reply(handleEffort(arg));
             case "/resume":
                 return new Action.Reply(renderResume(chatId));
+            case "/status":
+                return new Action.Reply(renderStatus(chatId));
             case "/analyze":
                 return new Action.DelegateToAgent(buildAnalyzePrompt());
             case "/suggest":
@@ -256,6 +264,55 @@ public class SlashRouter {
             sb.append(label).append("：").append(text).append("\n\n");
         }
         sb.append("---\n用 /new 清空上下文開始新對話。");
+        return sb.toString();
+    }
+
+    private String renderStatus(String chatId) {
+        StringBuilder sb = new StringBuilder("📊 Session 狀態\n\n");
+
+        // Model & effort
+        sb.append("模型：").append(modelName.isEmpty() ? "（未設定）" : modelName).append("\n");
+        String effort = "medium";
+        if (preferencesStore != null) {
+            effort = preferencesStore.load().effort;
+        }
+        sb.append("Effort：").append(effort).append("\n\n");
+
+        // Context
+        int contextSize = conversationStore.size(chatId);
+        int maxContext = 20;
+        sb.append("對話上下文：").append(contextSize).append(" / ").append(maxContext).append(" 則");
+        if (contextSize == 0) {
+            sb.append("（空）");
+        }
+        sb.append("\n\n");
+
+        // Profile summary
+        UserProfile p = memoryStore.loadUserProfile();
+        if (p.name != null && !p.name.isBlank()) {
+            sb.append("使用者：").append(p.name);
+            if (p.targetCalories > 0) {
+                sb.append("（目標 ").append(p.targetCalories).append(" kcal）");
+            }
+            sb.append("\n");
+        } else {
+            sb.append("使用者：未設定（用 /setup 開始）\n");
+        }
+
+        // Today's intake
+        DailyLog log = dailyLogStore.loadToday();
+        dailyLogStore.recalculateSummary(log, p);
+        int meals = log.meals == null ? 0 : log.meals.size();
+        sb.append("今日：").append(meals).append(" 餐，")
+          .append(log.dailySummary.totalKcal).append(" kcal\n");
+
+        // Memory & skills
+        sb.append("長期記憶：").append(memoryStore.loadMemory().entries == null ? 0 : memoryStore.loadMemory().entries.size()).append(" 條\n");
+        sb.append("知識模組：").append(skillManager.listSkills().size()).append(" 個\n");
+
+        // Chart service
+        sb.append("圖表服務：").append(chartService != null ? "QuickChart (已啟用)" : "文字模式").append("\n");
+
         return sb.toString();
     }
 
