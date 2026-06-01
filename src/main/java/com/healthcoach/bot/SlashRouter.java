@@ -1,6 +1,7 @@
 package com.healthcoach.bot;
 
 import com.healthcoach.agent.ConversationStore;
+import com.healthcoach.chart.ChartService;
 import com.healthcoach.memory.DailyLogStore;
 import com.healthcoach.memory.MemoryStore;
 import com.healthcoach.memory.PreferencesStore;
@@ -12,6 +13,8 @@ import com.healthcoach.model.MemoryEntry;
 import com.healthcoach.model.Preferences;
 import com.healthcoach.model.SkillSummary;
 import com.healthcoach.model.UserProfile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -19,10 +22,12 @@ import java.util.List;
 import java.util.Locale;
 
 public class SlashRouter {
+    private static final Logger log = LoggerFactory.getLogger(SlashRouter.class);
 
     public sealed interface Action {
         record Reply(String text) implements Action {}
         record DelegateToAgent(String syntheticUserMessage) implements Action {}
+        record SendPhoto(byte[] image, String caption) implements Action {}
         record NotHandled() implements Action {}
     }
 
@@ -41,7 +46,7 @@ public class SlashRouter {
             "/effort — 設定模型 reasoning effort（low/medium/high）\n" +
             "/analyze — 分析今日熱量狀況並建議下一餐\n" +
             "/suggest <早餐|午餐|晚餐|宵夜> — 根據偏好給建議\n" +
-            "/chart — 用 markdown 表格呈現本週飲食趨勢\n" +
+            "/chart — 本週飲食趨勢圖（有 API 則送 PNG，否則文字表格）\n" +
             "/help — 顯示這份指令清單";
 
     private static final String REMINDERS_USAGE =
@@ -69,6 +74,7 @@ public class SlashRouter {
     private final ConversationStore conversationStore;
     private final PreferencesStore preferencesStore;  // nullable for legacy tests
     private final Runnable onPreferencesChanged;       // nullable
+    private ChartService chartService;                 // nullable
 
     /** Legacy constructor (no /reminders support). */
     public SlashRouter(MemoryStore memoryStore, SkillManager skillManager,
@@ -86,6 +92,10 @@ public class SlashRouter {
         this.conversationStore = conversationStore;
         this.preferencesStore = preferencesStore;
         this.onPreferencesChanged = onPreferencesChanged;
+    }
+
+    public void setChartService(ChartService chartService) {
+        this.chartService = chartService;
     }
 
     /** Dispatch a possible slash command. Returns NotHandled if text is not a slash command we know. */
@@ -120,7 +130,7 @@ public class SlashRouter {
             case "/suggest":
                 return new Action.DelegateToAgent(buildSuggestPrompt(arg));
             case "/chart":
-                return new Action.DelegateToAgent(buildChartPrompt());
+                return handleChart();
             default:
                 return new Action.NotHandled();
         }
@@ -163,9 +173,10 @@ public class SlashRouter {
         if (log.meals == null || log.meals.isEmpty()) {
             sb.append("還沒記錄任何一餐。\n");
         } else {
-            for (MealEntry m : log.meals) {
-                sb.append(String.format("• %s  %s — %d kcal (P%d C%d F%d)\n",
-                        m.time, m.description, m.estimatedKcal, m.proteinG, m.carbsG, m.fatG));
+            for (int i = 0; i < log.meals.size(); i++) {
+                MealEntry m = log.meals.get(i);
+                sb.append(String.format("#%d  %s  %s — %d kcal (P%d C%d F%d)\n",
+                        i, m.time, m.description, m.estimatedKcal, m.proteinG, m.carbsG, m.fatG));
             }
         }
         if (log.workout != null) {
@@ -380,6 +391,21 @@ public class SlashRouter {
                "每個選項用一行：\n" +
                "<品名> — 約 <kcal> kcal，蛋白質 <g>g（理由一句話）\n" +
                "不要 PATCH/LOG，不要 markdown 表格。";
+    }
+
+    private Action handleChart() {
+        if (chartService != null) {
+            try {
+                ChartService.ChartResult result = chartService.generateWeeklyChart();
+                if (result != null) {
+                    return new Action.SendPhoto(result.png(), result.caption());
+                }
+                return new Action.Reply("本週沒有任何飲食紀錄，無法產生圖表。先記錄一餐再試試！");
+            } catch (Exception e) {
+                log.warn("chart generation failed, falling back to text: {}", e.getMessage());
+            }
+        }
+        return new Action.DelegateToAgent(buildChartPrompt());
     }
 
     private String buildChartPrompt() {

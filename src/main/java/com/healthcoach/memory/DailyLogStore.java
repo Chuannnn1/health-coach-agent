@@ -82,6 +82,18 @@ public class DailyLogStore {
         saveLog(log);
     }
 
+    /** Remove a meal from today's log by 0-based index, recalculate totals, and persist. Returns true if removed. */
+    public boolean removeMeal(int index) {
+        DailyLog log = loadToday();
+        if (log.meals == null || index < 0 || index >= log.meals.size()) {
+            return false;
+        }
+        log.meals.remove(index);
+        sumMealTotals(log);
+        saveLog(log);
+        return true;
+    }
+
     /** Set (overwrite) today's workout entry and persist. */
     public void setWorkout(WorkoutEntry workout) {
         DailyLog log = loadToday();

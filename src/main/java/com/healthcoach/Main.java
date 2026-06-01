@@ -8,6 +8,7 @@ import com.healthcoach.agent.PatchExecutor;
 import com.healthcoach.agent.PromptBuilder;
 import com.healthcoach.bot.ProfileWizard;
 import com.healthcoach.bot.SlashRouter;
+import com.healthcoach.chart.ChartService;
 import com.healthcoach.bot.LineWebhookServer;
 import com.healthcoach.bot.TelegramBot;
 import com.healthcoach.memory.DailyLogStore;
@@ -71,6 +72,14 @@ public class Main {
                 preferencesStore, reschedule);
         SlashRouter slashRouter = new SlashRouter(memoryStore, skillManager, dailyLogStore,
                 conversationStore, preferencesStore, reschedule);
+
+        String chartApiKey = null;
+        if (config.has("services") && config.getAsJsonObject("services").has("chartApiKey")) {
+            chartApiKey = config.getAsJsonObject("services").get("chartApiKey").getAsString();
+        }
+        ChartService chartService = new ChartService(dailyLogStore, memoryStore, chartApiKey);
+        slashRouter.setChartService(chartService);
+
         ProfileWizard profileWizard = new ProfileWizard(memoryStore);
         profileWizard.setAssessor(prompt -> {
             try {

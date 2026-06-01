@@ -146,6 +146,10 @@ public class PatchExecutor {
             applyPreferencesPatch(p, patchResults);
             return;
         }
+        if ("daily_log".equals(target)) {
+            applyDailyLogPatch(p, patchResults);
+            return;
+        }
         if ("memory".equals(target)) {
             String action = p.action == null ? "" : p.action;
             switch (action) {
@@ -182,6 +186,32 @@ public class PatchExecutor {
             return;
         }
         patchResults.add("Unknown patch target: " + target);
+    }
+
+    private void applyDailyLogPatch(PatchInstruction p, List<String> patchResults) {
+        String action = p.action == null ? "" : p.action;
+        if ("remove_meal".equals(action)) {
+            int index = -1;
+            try {
+                if (p.value instanceof Number) {
+                    index = ((Number) p.value).intValue();
+                } else if (p.value instanceof String) {
+                    index = Integer.parseInt(((String) p.value).trim());
+                } else if (p.value != null) {
+                    index = (int) Double.parseDouble(p.value.toString());
+                }
+            } catch (NumberFormatException ignored) {}
+            if (index < 0) {
+                patchResults.add("daily_log remove_meal failed (invalid index)");
+                return;
+            }
+            boolean ok = dailyLogStore.removeMeal(index);
+            String desc = "meal #" + index + " removed";
+            patchResults.add(ok ? desc : "daily_log remove_meal failed (index out of range)");
+            if (ok) fireListener(true, desc);
+            return;
+        }
+        patchResults.add("daily_log action unknown: " + action);
     }
 
     /** Mutate preferences (schedule / timezone) and fire reschedule. */

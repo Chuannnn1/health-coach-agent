@@ -14,6 +14,8 @@ import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.send.SendChatAction;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
+import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
@@ -23,6 +25,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
+import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -151,6 +154,11 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
                 }
                 if (action instanceof SlashRouter.Action.DelegateToAgent d) {
                     enqueueAgentCall(chatId, d.syntheticUserMessage());
+                    return;
+                }
+                if (action instanceof SlashRouter.Action.SendPhoto p) {
+                    log.info("sending chart photo to chatId={}, size={} bytes", chatId, p.image().length);
+                    sendPhoto(chatId, p.image(), p.caption());
                     return;
                 }
                 // NotHandled → fall through to normal agent path
@@ -305,6 +313,21 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
             telegramClient.execute(SendMessage.builder().chatId(chatId).text(text).build());
         } catch (TelegramApiException e) {
             log.warn("sendText failed: {}", e.getMessage());
+        }
+    }
+
+    private void sendPhoto(String chatId, byte[] image, String caption) {
+        try {
+            InputFile photo = new InputFile(new ByteArrayInputStream(image), "chart.png");
+            SendPhoto msg = SendPhoto.builder()
+                    .chatId(chatId)
+                    .photo(photo)
+                    .caption(caption)
+                    .build();
+            telegramClient.execute(msg);
+        } catch (TelegramApiException e) {
+            log.warn("sendPhoto failed: {}", e.getMessage());
+            if (caption != null) sendText(chatId, caption + "\n（圖表發送失敗）");
         }
     }
 
