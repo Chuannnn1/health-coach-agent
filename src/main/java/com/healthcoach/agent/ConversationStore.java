@@ -91,10 +91,17 @@ public class ConversationStore {
             }
         }
         if (conversationsDir != null) {
-            try {
-                Files.deleteIfExists(fileFor(chatId));
-            } catch (IOException e) {
-                log.warn("failed to delete conversation file for {}: {}", chatId, e.getMessage());
+            Path current = fileFor(chatId);
+            if (Files.exists(current)) {
+                try {
+                    String ts = java.time.LocalDateTime.now()
+                            .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+                    Path archive = conversationsDir.resolve(chatId + "_" + ts + ".json");
+                    Files.move(current, archive);
+                    log.info("archived conversation {} -> {}", current.getFileName(), archive.getFileName());
+                } catch (IOException e) {
+                    log.warn("failed to archive conversation for {}: {}", chatId, e.getMessage());
+                }
             }
         }
     }
@@ -117,7 +124,9 @@ public class ConversationStore {
     private void loadAll() {
         if (conversationsDir == null || !Files.isDirectory(conversationsDir)) return;
         try (Stream<Path> files = Files.list(conversationsDir)) {
-            files.filter(p -> p.toString().endsWith(".json")).forEach(this::loadFile);
+            files.filter(p -> p.toString().endsWith(".json"))
+                 .filter(p -> !p.getFileName().toString().contains("_"))
+                 .forEach(this::loadFile);
         } catch (IOException e) {
             log.warn("failed to scan conversations dir: {}", e.getMessage());
         }
