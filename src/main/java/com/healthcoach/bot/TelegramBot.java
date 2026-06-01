@@ -279,17 +279,19 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
     private void sendToolStatus(String chatId, boolean isPatch, String desc) {
         String icon;
         if (!isPatch) {
-            icon = "📝";  // 📝
+            icon = "📝";
+        } else if (desc.startsWith("meal #")) {
+            icon = "🗑️";
         } else if (desc.startsWith("user_profile")) {
-            icon = "👤";  // 👤
+            icon = "👤";
         } else if (desc.startsWith("memory")) {
-            icon = "🧠";  // 🧠
+            icon = "🧠";
         } else if (desc.startsWith("skill/")) {
-            icon = "📖";  // 📖
+            icon = "📖";
         } else if (desc.startsWith("preferences")) {
-            icon = "⚙️";  // ⚙️
+            icon = "⚙️";
         } else {
-            icon = "🔧";  // 🔧
+            icon = "🔧";
         }
         sendText(chatId, icon + " " + desc);
     }
