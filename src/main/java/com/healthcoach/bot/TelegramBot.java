@@ -357,6 +357,7 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
                 new BotCommand("skill", "查看某個知識模組的內容"),
                 new BotCommand("reminders", "看 / 改用餐 & 訓練提醒"),
                 new BotCommand("effort", "設定模型 reasoning effort"),
+                new BotCommand("resume", "查看目前對話上下文"),
                 new BotCommand("analyze", "分析今日狀況並建議下一餐"),
                 new BotCommand("suggest", "根據偏好推薦餐點"),
                 new BotCommand("chart", "本週飲食趨勢表"),

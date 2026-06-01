@@ -61,7 +61,7 @@ public class Main {
 
         PromptBuilder promptBuilder = new PromptBuilder(memoryStore, skillManager, dailyLogStore);
         AgentCore agentCore = new AgentCore(promptBuilder, llmCfg, preferencesStore);
-        ConversationStore conversationStore = new ConversationStore(20);
+        ConversationStore conversationStore = new ConversationStore(20, dataDir);
 
         CronScheduler[] schedulerHolder = new CronScheduler[1];
         Runnable reschedule = () -> {

@@ -46,6 +46,7 @@ public class SlashRouter {
             "/effort — 設定模型 reasoning effort（low/medium/high）\n" +
             "/analyze — 分析今日熱量狀況並建議下一餐\n" +
             "/suggest <早餐|午餐|晚餐|宵夜> — 根據偏好給建議\n" +
+            "/resume — 查看目前對話上下文（重啟後自動恢復）\n" +
             "/chart — 本週飲食趨勢圖（有 API 則送 PNG，否則文字表格）\n" +
             "/help — 顯示這份指令清單";
 
@@ -125,6 +126,8 @@ public class SlashRouter {
                 return new Action.Reply(handleReminders(arg));
             case "/effort":
                 return new Action.Reply(handleEffort(arg));
+            case "/resume":
+                return new Action.Reply(renderResume(chatId));
             case "/analyze":
                 return new Action.DelegateToAgent(buildAnalyzePrompt());
             case "/suggest":
@@ -232,6 +235,28 @@ public class SlashRouter {
         } catch (IllegalArgumentException e) {
             return "找不到知識模組「" + name + "」。用 /skills 看可用清單。";
         }
+    }
+
+    private String renderResume(String chatId) {
+        List<ConversationStore.Message> history = conversationStore.recent(chatId);
+        if (history.isEmpty()) {
+            return "目前沒有對話紀錄。重啟後如有先前的對話會自動載入。";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("💬 對話上下文（").append(history.size()).append(" 則）：\n\n");
+        int start = Math.max(0, history.size() - 10);
+        if (start > 0) {
+            sb.append("… 較早的 ").append(start).append(" 則已省略\n\n");
+        }
+        for (int i = start; i < history.size(); i++) {
+            ConversationStore.Message m = history.get(i);
+            String label = "user".equals(m.role()) ? "你" : "Coach";
+            String text = m.content();
+            if (text.length() > 120) text = text.substring(0, 120) + "…";
+            sb.append(label).append("：").append(text).append("\n\n");
+        }
+        sb.append("---\n用 /new 清空上下文開始新對話。");
+        return sb.toString();
     }
 
     private String handleReminders(String arg) {
