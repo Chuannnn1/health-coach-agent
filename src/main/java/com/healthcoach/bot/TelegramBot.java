@@ -118,9 +118,10 @@ public class TelegramBot implements LongPollingSingleThreadUpdateConsumer, Messa
         String chatId = String.valueOf(update.getMessage().getChatId());
         String text = update.getMessage().getText();
 
+        registeredChatIds.add(chatId);
+
         try {
             if ("/start".equals(text.trim())) {
-                registeredChatIds.add(chatId);
                 sendText(chatId, WELCOME);
                 return;
             }

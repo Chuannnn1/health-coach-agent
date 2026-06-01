@@ -108,6 +108,7 @@ public class Main {
 
             CronScheduler scheduler = new CronScheduler(lineServer, dailyLogStore, memoryStore, preferencesStore);
             schedulerHolder[0] = scheduler;
+            slashRouter.setCronScheduler(scheduler);
             scheduler.start();
 
             log.info("Health Coach Agent 已啟動！(LINE webhook on port {})", linePort);
@@ -134,6 +135,7 @@ public class Main {
             bot.setProfileWizard(profileWizard);
             CronScheduler scheduler = new CronScheduler(bot, dailyLogStore, memoryStore, preferencesStore);
             schedulerHolder[0] = scheduler;
+            slashRouter.setCronScheduler(scheduler);
 
             TelegramBotsLongPollingApplication botsApp = new TelegramBotsLongPollingApplication();
             botsApp.registerBot(botToken, bot);

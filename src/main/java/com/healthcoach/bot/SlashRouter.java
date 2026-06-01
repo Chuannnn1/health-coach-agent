@@ -2,6 +2,7 @@ package com.healthcoach.bot;
 
 import com.healthcoach.agent.ConversationStore;
 import com.healthcoach.chart.ChartService;
+import com.healthcoach.scheduler.CronScheduler;
 import com.healthcoach.memory.DailyLogStore;
 import com.healthcoach.memory.MemoryStore;
 import com.healthcoach.memory.PreferencesStore;
@@ -77,6 +78,7 @@ public class SlashRouter {
     private final PreferencesStore preferencesStore;  // nullable for legacy tests
     private final Runnable onPreferencesChanged;       // nullable
     private ChartService chartService;                 // nullable
+    private CronScheduler cronScheduler;               // nullable
     private String modelName = "";                     // set from config
 
     /** Legacy constructor (no /reminders support). */
@@ -103,6 +105,10 @@ public class SlashRouter {
 
     public void setModelName(String modelName) {
         this.modelName = modelName == null ? "" : modelName;
+    }
+
+    public void setCronScheduler(CronScheduler cronScheduler) {
+        this.cronScheduler = cronScheduler;
     }
 
     /** Dispatch a possible slash command. Returns NotHandled if text is not a slash command we know. */
@@ -142,6 +148,8 @@ public class SlashRouter {
                 return new Action.DelegateToAgent(buildSuggestPrompt(arg));
             case "/chart":
                 return handleChart();
+            case "/test_reminder":
+                return new Action.Reply(handleTestReminder(chatId, arg));
             default:
                 return new Action.NotHandled();
         }
@@ -314,6 +322,31 @@ public class SlashRouter {
         sb.append("圖表服務：").append(chartService != null ? "QuickChart (已啟用)" : "文字模式").append("\n");
 
         return sb.toString();
+    }
+
+    private String handleTestReminder(String chatId, String arg) {
+        if (cronScheduler == null) {
+            return "CronScheduler 未連接。";
+        }
+        List<String> types = new ArrayList<>();
+        if (arg == null || arg.isBlank() || "all".equals(arg)) {
+            types.addAll(List.of("breakfast", "lunch", "dinner", "workout"));
+        } else {
+            for (String t : arg.split("[,\\s]+")) {
+                String trimmed = t.trim().toLowerCase(Locale.ROOT);
+                if (!trimmed.isEmpty()) types.add(trimmed);
+            }
+        }
+        int sent = 0;
+        for (String type : types) {
+            try {
+                cronScheduler.sendReminder(chatId, type);
+                sent++;
+            } catch (Exception e) {
+                log.warn("test_reminder failed for {}: {}", type, e.getMessage());
+            }
+        }
+        return "已觸發 " + sent + " 則提醒（" + String.join(", ", types) + "）";
     }
 
     private String handleReminders(String arg) {

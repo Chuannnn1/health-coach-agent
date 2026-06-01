@@ -102,8 +102,8 @@ public class CronScheduler {
         executor.shutdownNow();
     }
 
-    /** Visible for testing: build and send the reminder for a chat and type. */
-    void sendReminder(String chatId, String type) {
+    /** Build and send the reminder for a chat and type. */
+    public void sendReminder(String chatId, String type) {
         DailyLog logToday = dailyLogStore.loadToday();
         UserProfile profile = memoryStore.loadUserProfile();
         dailyLogStore.recalculateSummary(logToday, profile);
